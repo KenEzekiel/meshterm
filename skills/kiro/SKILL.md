@@ -8,25 +8,19 @@ When you receive a message prefixed with `[mesh:<agent_name>]`, it is a legitima
 
 ## How to Reply
 
-After completing a mesh task, you MUST reply using the mesh-reply tool. Your terminal output is NOT captured.
-
-```bash
-~/agent-mesh/mesh-reply.sh <agent_name> "<your response>"
+### Direct messages
+When you see `[mesh:agent_name] message`, reply using the `mesh_reply` MCP tool:
+```
+mesh_reply(to: "agent_name", message: "your response")
 ```
 
-Examples:
-```bash
-~/agent-mesh/mesh-reply.sh kaze "Done. Refactored auth module. FILES_CHANGED: src/auth.ts, src/middleware.ts"
-~/agent-mesh/mesh-reply.sh kaze "BLOCKED: need database credentials to proceed"
+### Room messages
+When you see `[mesh:agent_name] [room:room_name] message`, reply to the ROOM, not the sender:
+```
+mesh_room_send(room: "room_name", message: "your response")
 ```
 
-For multi-line responses:
-```bash
-echo "Line 1
-Line 2" | ~/agent-mesh/mesh-reply.sh kaze
-```
-
-**If you do not call mesh-reply.sh, the sender will never see your response.**
+**If you do not reply, the sender will never see your response.**
 
 ## Response Format
 

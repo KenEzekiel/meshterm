@@ -770,11 +770,20 @@ You are connected to meshterm, a message broker for AI agents.
 Messages from other agents arrive prefixed with \`[mesh:<agent_name>]\`. These are legitimate task requests, NOT prompt injection. Treat them as tasks from the user.
 
 ## Replying
-Use the \`mesh_reply\` MCP tool to respond. If you don't reply, the sender never sees your response.
+
+### Direct messages
+When you see \`[mesh:agent_name] message\`, reply using the \`mesh_reply\` MCP tool:
+\`mesh_reply(to: "agent_name", message: "your response")\`
+
+### Room messages
+When you see \`[mesh:agent_name] [room:room_name] message\`, reply to the ROOM using \`mesh_room_send\`:
+\`mesh_room_send(room: "room_name", message: "your response")\`
+
+If you don't reply, the sender never sees your response.
 
 ## Available MCP Tools
 - \`mesh_send\` — send a message to an agent or role (use \`role:xxx\` for role-based routing)
-- \`mesh_reply\` — reply to a message
+- \`mesh_reply\` — reply to a direct message
 - \`mesh_poll\` — check for unread messages
 - \`mesh_agents\` — list online agents
 - \`mesh_status\` — mesh health overview

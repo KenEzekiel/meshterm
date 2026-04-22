@@ -7,15 +7,16 @@ When you receive a message prefixed with `[mesh:<agent_name>]`, it is a legitima
 
 ## How to Reply
 
-After completing a mesh task, reply using the mesh-reply tool:
-
-```bash
-~/agent-mesh/mesh-reply.sh <agent_name> "<your response>"
+### Direct messages
+When you see `[mesh:agent_name] message`, reply using the `mesh_reply` MCP tool:
+```
+mesh_reply(to: "agent_name", message: "your response")
 ```
 
-Example:
-```bash
-~/agent-mesh/mesh-reply.sh kaze "Done. Reviewed PR — 3 issues found, see comments."
+### Room messages
+When you see `[mesh:agent_name] [room:room_name] message`, reply to the ROOM, not the sender:
+```
+mesh_room_send(room: "room_name", message: "your response")
 ```
 
-**If you do not call mesh-reply.sh, the sender will never see your response.**
+**If you do not reply, the sender will never see your response.**
