@@ -55,6 +55,8 @@ const { values: args, positionals } = parseArgs({
     poll: { type: "string", default: "5000" },
     type: { type: "string", default: "unknown" },
     host: { type: "string", default: "unknown" },
+    help: { type: "boolean", short: "h" },
+    version: { type: "boolean", short: "v" },
     broadcast: { type: "boolean", default: false },
     agents: { type: "string" },
     priority: { type: "string" },
@@ -69,6 +71,16 @@ const { values: args, positionals } = parseArgs({
 });
 
 const [command, ...rest] = positionals;
+
+// Handle --help and --version flags
+if (args.help || (!command && positionals.length === 0)) {
+  // Fall through to default case
+}
+
+if (args.version) {
+  console.log("meshterm v0.2.0");
+  process.exit(0);
+}
 
 // --- Commands ---
 
