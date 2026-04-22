@@ -1,0 +1,30 @@
+{
+  "name": "meshterm",
+  "version": "0.1.0",
+  "description": "Agent-agnostic communication layer for AI agents",
+  "type": "module",
+  "bin": {
+    "meshterm": "./packages/cli/index.ts"
+  },
+  "scripts": {
+    "server": "bun run packages/server/server.ts",
+    "client": "bun run packages/client/mesh-client.ts"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "mesh",
+    "communication",
+    "tmux",
+    "mcp"
+  ],
+  "author": "Ken Ezekiel",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kennezekiel/meshterm"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}

@@ -1,0 +1,25 @@
+services:
+  mesh-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: meshterm
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4200:4200"
+    volumes:
+      - mesh-data:/data
+    environment:
+      - MESH_SECRET=${MESH_SECRET:-mesh-dev-secret}
+      - MESH_PORT=4200
+      - MESH_STORE=/data/mesh-store.json
+    networks:
+      - default
+      - npm_default
+
+volumes:
+  mesh-data:
+
+networks:
+  npm_default:
+    external: true
