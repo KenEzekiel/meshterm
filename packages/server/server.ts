@@ -12,6 +12,43 @@ const SECRET = process.env.MESH_SECRET ?? "mesh-dev-secret";
 const STORE_PATH = process.env.MESH_STORE ?? "./mesh-store.json";
 const MAX_MESSAGES = 1000; // keep last N messages in memory
 
+// Webhook config: when a message arrives for a specific agent, POST to a webhook
+// Format: MESH_WEBHOOKS=agent:url:token,agent2:url2:token2
+const WEBHOOKS: Map<string, { url: string; token: string }> = new Map();
+if (process.env.MESH_WEBHOOKS) {
+  for (const entry of process.env.MESH_WEBHOOKS.split(",")) {
+    const [agent, url, token] = entry.split("|");
+    if (agent && url && token) {
+      WEBHOOKS.set(agent, { url, token });
+      console.log(`Webhook registered: ${agent} → ${url}`);
+    }
+  }
+}
+
+async function fireWebhook(agent: string, msg: Message) {
+  const hook = WEBHOOKS.get(agent);
+  if (!hook) return;
+  try {
+    await fetch(hook.url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${hook.token}`,
+      },
+      body: JSON.stringify({
+        message: `[meshterm] Message from ${msg.from_agent}: ${msg.body}`,
+        name: "meshterm",
+        sessionKey: `hook:meshterm:${msg.id}`,
+        wakeMode: "now",
+        deliver: true,
+        channel: "last",
+      }),
+    });
+  } catch (err: any) {
+    console.error(`Webhook failed for ${agent}: ${err.message}`);
+  }
+}
+
 // --- Types ---
 
 interface Message {
@@ -257,6 +294,7 @@ Bun.serve({
               read: false,
             };
             messages.push(msg);
+            fireWebhook(msg.to_agent, msg);
             createdMessages.push(msg);
           }
           
@@ -293,6 +331,7 @@ Bun.serve({
           read: false,
         };
         messages.push(msg);
+        fireWebhook(msg.to_agent, msg);
         
         // Trim old messages
         if (messages.length > MAX_MESSAGES * 1.5) {
@@ -321,6 +360,7 @@ Bun.serve({
         read: false,
       };
       messages.push(msg);
+      fireWebhook(msg.to_agent, msg);
       // Trim old messages
       if (messages.length > MAX_MESSAGES * 1.5) {
         messages = messages.slice(-MAX_MESSAGES);

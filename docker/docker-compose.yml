@@ -13,13 +13,17 @@ services:
       - MESH_SECRET=${MESH_SECRET:-mesh-dev-secret}
       - MESH_PORT=4200
       - MESH_STORE=/data/mesh-store.json
+      - MESH_WEBHOOKS=${MESH_WEBHOOKS:-}
     networks:
       - default
       - npm_default
+      - openclaw_default
 
 volumes:
   mesh-data:
 
 networks:
   npm_default:
+    external: true
+  openclaw_default:
     external: true
