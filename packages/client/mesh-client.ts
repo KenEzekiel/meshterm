@@ -1,11 +1,9 @@
 #!/usr/bin/env bun
 /**
- * Mesh Client v2 — Dumb pipe. Inject only.
- * Polls mesh for messages, injects into tmux. That's it.
- * The agent replies back via mesh-reply.sh (a tool it knows about).
- *
- * Usage:
- *   MESH_SECRET=xxx bun mesh-client.ts --agent kiro-mac --session kiro --mesh https://mesh.kennezekiel.tech
+ * Mesh Client v3 — Dumb pipe with retry.
+ * Polls mesh for unread messages, injects into tmux.
+ * Does NOT mark messages as read — agent does that via MCP mesh_poll/mesh_reply.
+ * Re-injects if message stays unread (up to MAX_ATTEMPTS, 30s apart).
  */
 
 import { parseArgs } from "util";
@@ -27,11 +25,16 @@ const SECRET = args.secret!;
 const AGENT = args.agent!;
 const SESSION = args.session!;
 const POLL_MS = Number(args.poll);
+const MAX_ATTEMPTS = 5;
+const RETRY_INTERVAL_MS = 30_000; // 30s between re-injects
 
 const headers = {
   "content-type": "application/json",
   "x-mesh-secret": SECRET,
 };
+
+// Track injected messages: id → { attempts, lastInjectedAt }
+const tracker: Map<string, { attempts: number; lastInjectedAt: number }> = new Map();
 
 async function meshFetch(path: string, opts?: RequestInit) {
   const res = await fetch(`${MESH}${path}`, { ...opts, headers });
@@ -49,7 +52,6 @@ function tmuxSend(session: string, text: string) {
   return true;
 }
 
-// --- Register ---
 async function register() {
   try {
     await meshFetch("/agents/register", {
@@ -62,7 +64,6 @@ async function register() {
   }
 }
 
-// --- Main Loop ---
 let processing = false;
 
 async function pollAndInject() {
@@ -70,23 +71,52 @@ async function pollAndInject() {
 
   try {
     const msgs = await meshFetch(`/messages/${AGENT}?unread=true`);
-    if (!msgs.length) return;
+    if (!msgs.length) {
+      // All messages read — clean up tracker
+      tracker.clear();
+      return;
+    }
 
     processing = true;
+    const now = Date.now();
 
     for (const msg of msgs) {
-      console.log(`📨 From ${msg.from_agent}: ${msg.body.slice(0, 80)}...`);
+      const tracked = tracker.get(msg.id);
 
-      // Inject into tmux
-      const injected = `[mesh:${msg.from_agent}] ${msg.body}`;
-      if (!tmuxSend(SESSION, injected)) {
-        console.error("Failed to inject, skipping");
-        continue;
+      if (tracked) {
+        // Already injected before — check if we should retry
+        if (tracked.attempts >= MAX_ATTEMPTS) {
+          // Give up, but message stays unread on server (safety net for mesh_poll)
+          continue;
+        }
+        if (now - tracked.lastInjectedAt < RETRY_INTERVAL_MS) {
+          // Too soon to retry
+          continue;
+        }
+        // Re-inject
+        const injected = `[mesh:${msg.from_agent}] ${msg.body}`;
+        if (tmuxSend(SESSION, injected)) {
+          tracked.attempts++;
+          tracked.lastInjectedAt = now;
+          console.log(`🔄 Re-injected (attempt ${tracked.attempts}/${MAX_ATTEMPTS}): ${msg.body.slice(0, 60)}...`);
+        }
+      } else {
+        // First time seeing this message — inject
+        const injected = `[mesh:${msg.from_agent}] ${msg.body}`;
+        if (tmuxSend(SESSION, injected)) {
+          tracker.set(msg.id, { attempts: 1, lastInjectedAt: now });
+          console.log(`📨 Injected from ${msg.from_agent}: ${msg.body.slice(0, 60)}...`);
+        } else {
+          console.error(`Failed to inject from ${msg.from_agent}, will retry`);
+          tracker.set(msg.id, { attempts: 0, lastInjectedAt: 0 }); // retry immediately next cycle
+        }
       }
+    }
 
-      // Mark as read
-      await meshFetch(`/messages/${msg.id}/read`, { method: "PATCH" });
-      console.log(`✅ Injected and marked read`);
+    // Clean up tracker entries for messages that are no longer unread
+    const unreadIds = new Set(msgs.map((m: any) => m.id));
+    for (const id of tracker.keys()) {
+      if (!unreadIds.has(id)) tracker.delete(id);
     }
   } catch (e: any) {
     console.error(`Poll error: ${e.message}`);
@@ -96,8 +126,8 @@ async function pollAndInject() {
 }
 
 // --- Start ---
-console.log(`🕸️  Mesh Client v2 (inject-only) | agent=${AGENT} | session=${SESSION} | mesh=${MESH}`);
-console.log(`   Polling every ${POLL_MS}ms`);
+console.log(`🕸️  Mesh Client v3 (inject + retry) | agent=${AGENT} | session=${SESSION} | mesh=${MESH}`);
+console.log(`   Polling every ${POLL_MS}ms | Max ${MAX_ATTEMPTS} inject attempts | Retry every ${RETRY_INTERVAL_MS / 1000}s`);
 
 await register();
 setInterval(pollAndInject, POLL_MS);
