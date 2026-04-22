@@ -36,12 +36,8 @@ async function fireWebhook(agent: string, msg: Message) {
         "Authorization": `Bearer ${hook.token}`,
       },
       body: JSON.stringify({
-        message: `[meshterm] Message from ${msg.from_agent}: ${msg.body}`,
-        name: "meshterm",
-        sessionKey: `hook:meshterm:${msg.id}`,
-        wakeMode: "now",
-        deliver: true,
-        channel: "last",
+        text: `[meshterm] Message from ${msg.from_agent}: ${msg.body}`,
+        mode: "now",
       }),
     });
   } catch (err: any) {
