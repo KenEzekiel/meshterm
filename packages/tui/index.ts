@@ -296,38 +296,42 @@ async function main() {
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
   };
 
-  let escapeSeq = "";
+  let escapeTimer: ReturnType<typeof setTimeout> | null = null;
 
   process.stdin.on("data", async (key: string) => {
-    // Escape sequence handling
-    if (key === "\x1b") { escapeSeq = key; return; }
-    if (escapeSeq) {
-      escapeSeq += key;
-      if (escapeSeq === "\x1b[A") { // Up
-        if (state.view === "dashboard") {
-          if (state.focusedPanel === 0 && state.selectedAgent > 0) state.selectedAgent--;
-          else if (state.focusedPanel === 1 && state.selectedMessage > 0) state.selectedMessage--;
-          else if (state.focusedPanel === 2 && state.selectedRoom > 0) state.selectedRoom--;
-        } else {
-          state.scrollOffset = Math.min(state.scrollOffset + 1, 50);
-        }
-        escapeSeq = "";
-        render(config, state);
-        return;
+    // Handle full escape sequences (Bun sends them as single chunks)
+    if (key === "\x1b[A") { // Up
+      if (state.view === "dashboard") {
+        if (state.focusedPanel === 0 && state.selectedAgent > 0) state.selectedAgent--;
+        else if (state.focusedPanel === 1 && state.selectedMessage > 0) state.selectedMessage--;
+        else if (state.focusedPanel === 2 && state.selectedRoom > 0) state.selectedRoom--;
+      } else {
+        state.scrollOffset = Math.min(state.scrollOffset + 1, 50);
       }
-      if (escapeSeq === "\x1b[B") { // Down
-        if (state.view === "dashboard") {
-          if (state.focusedPanel === 0 && state.selectedAgent < state.agents.length - 1) state.selectedAgent++;
-          else if (state.focusedPanel === 1 && state.selectedMessage < state.messages.length - 1) state.selectedMessage++;
-          else if (state.focusedPanel === 2 && state.selectedRoom < state.rooms.length - 1) state.selectedRoom++;
-        } else {
-          state.scrollOffset = Math.max(state.scrollOffset - 1, 0);
-        }
-        escapeSeq = "";
-        render(config, state);
-        return;
+      render(config, state);
+      return;
+    }
+    if (key === "\x1b[B") { // Down
+      if (state.view === "dashboard") {
+        if (state.focusedPanel === 0 && state.selectedAgent < state.agents.length - 1) state.selectedAgent++;
+        else if (state.focusedPanel === 1 && state.selectedMessage < state.messages.length - 1) state.selectedMessage++;
+        else if (state.focusedPanel === 2 && state.selectedRoom < state.rooms.length - 1) state.selectedRoom++;
+      } else {
+        state.scrollOffset = Math.max(state.scrollOffset - 1, 0);
       }
-      if (escapeSeq.length > 3) escapeSeq = "";
+      render(config, state);
+      return;
+    }
+
+    // Bare Escape key (for exiting chat/room)
+    if (key === "\x1b") {
+      if (state.view === "chat" || state.view === "room") {
+        state.view = "dashboard";
+        state.inputBuffer = "";
+        state.scrollOffset = 0;
+        await fetchDashboard(config, state);
+        render(config, state);
+      }
       return;
     }
 
@@ -369,14 +373,6 @@ async function main() {
 
     // Chat/Room input
     if (state.view === "chat" || state.view === "room") {
-      if (key === "\x1b") { // Escape
-        state.view = "dashboard";
-        state.inputBuffer = "";
-        state.scrollOffset = 0;
-        await fetchDashboard(config, state);
-        render(config, state);
-        return;
-      }
       if (key === "\r" || key === "\n") {
         if (state.inputBuffer.trim()) {
           try {
