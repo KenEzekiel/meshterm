@@ -235,6 +235,22 @@ switch (command) {
     break;
   }
 
+  case "tui": {
+    const config = loadConfig();
+    if (!config) {
+      console.error("❌ Not configured. Run: meshterm init");
+      process.exit(1);
+    }
+
+    const tuiPath = join(import.meta.dir, "../tui/index.ts");
+    const proc = spawn("bun", ["run", tuiPath], {
+      stdio: "inherit",
+      env: process.env,
+    });
+    proc.on("exit", (code) => process.exit(code ?? 0));
+    break;
+  }
+
   default:
     console.log(`meshterm — Agent-agnostic communication layer
 
