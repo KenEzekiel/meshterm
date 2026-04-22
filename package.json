@@ -22,7 +22,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kennezekiel/meshterm"
+    "url": "https://github.com/KenEzekiel/meshterm"
   },
   "engines": {
     "bun": ">=1.0.0"
