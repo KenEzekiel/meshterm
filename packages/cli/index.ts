@@ -284,7 +284,7 @@ switch (command) {
     }
 
     const payload: any = { 
-      from_agent: config.agent, 
+      from_agent: `user:${config.agent}`, 
       to_agent: to, 
       body 
     };
@@ -490,7 +490,7 @@ switch (command) {
       const result = await meshFetch(`/rooms/${encodeURIComponent(name)}/messages`, config, {
         method: "POST",
         body: JSON.stringify({
-          from_agent: config.agent,
+          from_agent: `user:${config.agent}`,
           body,
         }),
       });

@@ -99,7 +99,9 @@ async function fetchChatMessages(config: Config, state: State): Promise<void> {
     const all = await fetchWithCheck(`${config.server}/messages/${config.agent}/history?limit=100`, { headers: h });
     state.chatMessages = all.filter((m: Message) => 
       (m.from_agent === config.agent && m.to_agent === state.chatWith) ||
-      (m.from_agent === state.chatWith && m.to_agent === config.agent)
+      (m.from_agent === `user:${config.agent}` && m.to_agent === state.chatWith) ||
+      (m.from_agent === state.chatWith && m.to_agent === config.agent) ||
+      (m.from_agent === state.chatWith && m.to_agent === `user:${config.agent}`)
     );
   } catch (err: any) {
     state.error = err.message;
@@ -121,7 +123,7 @@ async function sendMessage(config: Config, to: string, body: string): Promise<vo
   await fetchWithCheck(`${config.server}/messages`, {
     method: "POST",
     headers: h,
-    body: JSON.stringify({ from_agent: config.agent, to_agent: to, body }),
+    body: JSON.stringify({ from_agent: `user:${config.agent}`, to_agent: to, body }),
   });
 }
 
@@ -130,7 +132,7 @@ async function sendRoomMessage(config: Config, room: string, body: string): Prom
   await fetchWithCheck(`${config.server}/rooms/${room}/messages`, {
     method: "POST",
     headers: h,
-    body: JSON.stringify({ from_agent: config.agent, body }),
+    body: JSON.stringify({ from_agent: `user:${config.agent}`, body }),
   });
 }
 
@@ -192,8 +194,8 @@ function renderDashboard(config: Config, state: State): string {
     if (i < state.messages.length) {
       const m = state.messages[i];
       const sel = state.focusedPanel === 1 && i === state.selectedMessage;
-      const dir = m.from_agent === config.agent ? `${CYN}→${RST}` : `${GRN}←${RST}`;
-      const other = m.from_agent === config.agent ? m.to_agent : m.from_agent;
+      const dir = (m.from_agent === config.agent || m.from_agent === `user:${config.agent}`) ? `${CYN}→${RST}` : `${GRN}←${RST}`;
+      const other = (m.from_agent === config.agent || m.from_agent === `user:${config.agent}`) ? m.to_agent : m.from_agent;
       const name = trunc(other, 12);
       const bodyMaxLen = rightW - 18; // More space for message body
       const body = trunc(m.body.replace(/\n/g, " "), bodyMaxLen);
@@ -241,7 +243,7 @@ function renderChat(config: Config, state: State): string {
   // Build wrapped lines from messages
   const lines: string[] = [];
   for (const m of state.chatMessages) {
-    const isMe = m.from_agent === config.agent;
+    const isMe = m.from_agent === config.agent || m.from_agent === `user:${config.agent}`;
     const sender = isMe ? "you" : m.from_agent;
     const body = m.body.replace(/\n/g, " ");
     const ago = timeAgo(m.created_at);
