@@ -538,7 +538,7 @@ switch (command) {
     // Agent configurations
     const agentConfigs: Record<string, { mcpPath: string; steeringPath?: string; steeringDir?: string }> = {
       kiro: {
-        mcpPath: join(HOME, ".kiro", "mcp.json"),
+        mcpPath: join(HOME, ".kiro", "settings", "mcp.json"),
         steeringPath: join(HOME, ".kiro", "steering", "meshterm.md"),
         steeringDir: join(HOME, ".kiro", "steering"),
       },
