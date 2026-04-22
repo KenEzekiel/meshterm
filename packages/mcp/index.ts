@@ -140,6 +140,105 @@ const TOOLS = [
       properties: {},
     },
   },
+  {
+    name: "mesh_room_create",
+    description: "Create a new room for multi-agent discussion",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Room name",
+        },
+        members: {
+          type: "string",
+          description: "Comma-separated list of agent names",
+        },
+        mode: {
+          type: "string",
+          description: "Room mode: free-form, round-robin, reactive, or moderated",
+          enum: ["free-form", "round-robin", "reactive", "moderated"],
+        },
+        moderator: {
+          type: "string",
+          description: "Moderator agent name (required for moderated mode)",
+        },
+      },
+      required: ["name", "members", "mode"],
+    },
+  },
+  {
+    name: "mesh_room_send",
+    description: "Send a message to a room",
+    inputSchema: {
+      type: "object",
+      properties: {
+        room: {
+          type: "string",
+          description: "Room name",
+        },
+        message: {
+          type: "string",
+          description: "Message body",
+        },
+      },
+      required: ["room", "message"],
+    },
+  },
+  {
+    name: "mesh_room_history",
+    description: "Get message history from a room",
+    inputSchema: {
+      type: "object",
+      properties: {
+        room: {
+          type: "string",
+          description: "Room name",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of messages to retrieve (default: 50)",
+        },
+      },
+      required: ["room"],
+    },
+  },
+  {
+    name: "mesh_room_join",
+    description: "Join a room",
+    inputSchema: {
+      type: "object",
+      properties: {
+        room: {
+          type: "string",
+          description: "Room name",
+        },
+      },
+      required: ["room"],
+    },
+  },
+  {
+    name: "mesh_room_leave",
+    description: "Leave a room",
+    inputSchema: {
+      type: "object",
+      properties: {
+        room: {
+          type: "string",
+          description: "Room name",
+        },
+      },
+      required: ["room"],
+    },
+  },
+  {
+    name: "mesh_room_list",
+    description: "List all available rooms",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
 ];
 
 // Tool handlers
@@ -233,6 +332,110 @@ Unread for you: ${msgs.length}`;
       ).join("\n\n");
       
       return `${roles.length} role(s) available:\n\n${formatted}`;
+    }
+
+    case "mesh_room_create": {
+      const { name, members, mode, moderator } = args;
+      if (!name || !members || !mode) {
+        throw new Error("Missing required parameters: name, members, mode");
+      }
+      
+      if (!["free-form", "round-robin", "reactive", "moderated"].includes(mode)) {
+        throw new Error("Mode must be free-form, round-robin, reactive, or moderated");
+      }
+      
+      if (mode === "moderated" && !moderator) {
+        throw new Error("Moderator required for moderated mode");
+      }
+      
+      const memberList = members.split(",").map((s: string) => s.trim());
+      const payload: any = { name, members: memberList, mode };
+      if (moderator) payload.moderator = moderator;
+      
+      const result = await meshFetch("/rooms", config, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      
+      return `✅ Room '${name}' created\nMode: ${mode}\nMembers: ${memberList.join(", ")}${moderator ? `\nModerator: ${moderator}` : ""}`;
+    }
+
+    case "mesh_room_send": {
+      const { room, message } = args;
+      if (!room || !message) {
+        throw new Error("Missing required parameters: room, message");
+      }
+      
+      const result = await meshFetch(`/rooms/${encodeURIComponent(room)}/messages`, config, {
+        method: "POST",
+        body: JSON.stringify({
+          from_agent: config.agent,
+          body: message,
+        }),
+      });
+      
+      return `✅ Message sent to room '${room}'\nMessage ID: ${result.message.id}`;
+    }
+
+    case "mesh_room_history": {
+      const { room, limit } = args;
+      if (!room) {
+        throw new Error("Missing required parameter: room");
+      }
+      
+      const limitParam = limit ?? 50;
+      const msgs = await meshFetch(`/rooms/${encodeURIComponent(room)}/messages?limit=${limitParam}`, config);
+      
+      if (!msgs.length) {
+        return `📭 No messages in room '${room}'`;
+      }
+      
+      const formatted = msgs.map((m: any) => 
+        `[${m.created_at}] ${m.from_agent}: ${m.body}`
+      ).join("\n");
+      
+      return `💬 ${msgs.length} message(s) in '${room}':\n\n${formatted}`;
+    }
+
+    case "mesh_room_join": {
+      const { room } = args;
+      if (!room) {
+        throw new Error("Missing required parameter: room");
+      }
+      
+      const result = await meshFetch(`/rooms/${encodeURIComponent(room)}/join`, config, {
+        method: "POST",
+        body: JSON.stringify({ agent: config.agent }),
+      });
+      
+      return `✅ Joined room '${room}'\nMembers: ${result.room.members.join(", ")}`;
+    }
+
+    case "mesh_room_leave": {
+      const { room } = args;
+      if (!room) {
+        throw new Error("Missing required parameter: room");
+      }
+      
+      const result = await meshFetch(`/rooms/${encodeURIComponent(room)}/leave`, config, {
+        method: "POST",
+        body: JSON.stringify({ agent: config.agent }),
+      });
+      
+      return `✅ Left room '${room}'\nRemaining members: ${result.room.members.join(", ")}`;
+    }
+
+    case "mesh_room_list": {
+      const rooms = await meshFetch("/rooms", config);
+      if (!rooms.length) {
+        return "No rooms available";
+      }
+      
+      const formatted = rooms.map((r: any) => 
+        `🚪 ${r.name} (${r.mode})\n   Members: ${r.members.join(", ")}${r.moderator ? `\n   Moderator: ${r.moderator}` : ""}\n   Created: ${r.created_at}\n   Last activity: ${r.last_activity}`
+      ).join("\n\n");
+      
+      return `${rooms.length} room(s) available:\n\n${formatted}`;
     }
 
     default:

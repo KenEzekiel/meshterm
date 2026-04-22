@@ -60,6 +60,10 @@ const { values: args, positionals } = parseArgs({
     priority: { type: "string" },
     fallback: { type: "string", default: "queue" },
     capabilities: { type: "string" },
+    members: { type: "string" },
+    mode: { type: "string" },
+    moderator: { type: "string" },
+    limit: { type: "string" },
   },
   allowPositionals: true,
 });
