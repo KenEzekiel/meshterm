@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
- * meshterm TUI
- * Terminal dashboard for mesh server monitoring
+ * meshterm TUI - Interactive Control Center
+ * Full-featured terminal dashboard for mesh server
  */
 
 import { readFileSync, existsSync } from "fs";
@@ -14,34 +14,35 @@ interface Config { server: string; secret: string; agent: string; }
 interface Agent { name: string; type: string; host: string; last_seen: string; }
 interface Message { id: string; from_agent: string; to_agent: string; body: string; created_at: string; read: boolean; }
 interface Room { name: string; members: string[]; mode: string; last_activity: string; }
+interface RoomMessage { id: string; room: string; from_agent: string; body: string; created_at: string; }
+
+type View = "dashboard" | "chat" | "room";
 
 interface State {
+  view: View;
   agents: Agent[];
   messages: Message[];
   rooms: Room[];
   connected: boolean;
   error: string | null;
-  totalMessages: number;
-  unreadCount: number;
   focusedPanel: number;
-  lastRefresh: Date;
+  selectedAgent: number;
+  selectedMessage: number;
+  selectedRoom: number;
+  chatWith: string | null;
+  chatMessages: Message[];
+  currentRoom: string | null;
+  roomMessages: RoomMessage[];
+  inputBuffer: string;
+  scrollOffset: number;
 }
 
 // ANSI
-const ALT_ON = "\x1b[?1049h";
-const ALT_OFF = "\x1b[?1049l";
-const HIDE = "\x1b[?25l";
-const SHOW = "\x1b[?25h";
-const RST = "\x1b[0m";
-const GRN = "\x1b[32m";
-const RED = "\x1b[31m";
-const YEL = "\x1b[33m";
-const CYN = "\x1b[36m";
-const DIM = "\x1b[2m";
-const BLD = "\x1b[1m";
-const INV = "\x1b[7m";
+const ALT_ON = "\x1b[?1049h", ALT_OFF = "\x1b[?1049l";
+const HIDE = "\x1b[?25l", SHOW = "\x1b[?25h";
+const RST = "\x1b[0m", GRN = "\x1b[32m", RED = "\x1b[31m", YEL = "\x1b[33m";
+const CYN = "\x1b[36m", DIM = "\x1b[2m", BLD = "\x1b[1m", INV = "\x1b[7m";
 const ERASE_LINE = "\x1b[2K";
-
 const mv = (r: number, c: number) => `\x1b[${r};${c}H`;
 
 function loadConfig(): Config | null {
@@ -49,133 +50,225 @@ function loadConfig(): Config | null {
   try { return JSON.parse(readFileSync(CONFIG_FILE, "utf-8")); } catch { return null; }
 }
 
-async function fetchData(config: Config, state: State): Promise<void> {
+async function fetchWithCheck(url: string, options: RequestInit): Promise<any> {
+  try {
+    const res = await fetch(url, options);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err: any) {
+    throw new Error(err.message ?? "Request failed");
+  }
+}
+
+async function fetchDashboard(config: Config, state: State): Promise<void> {
   try {
     const h = { "content-type": "application/json", "x-mesh-secret": config.secret };
-    const [healthRes, agentsRes, msgsRes, unreadRes, roomsRes] = await Promise.all([
-      fetch(`${config.server}/health`, { headers: h }),
-      fetch(`${config.server}/agents`, { headers: h }),
-      fetch(`${config.server}/messages/${config.agent}/history?limit=20`, { headers: h }),
-      fetch(`${config.server}/messages/${config.agent}?unread=true`, { headers: h }),
-      fetch(`${config.server}/rooms`, { headers: h }).catch(() => null),
-    ]);
-    const health = await healthRes.json();
-    state.agents = await agentsRes.json();
-    state.messages = (await msgsRes.json()).reverse();
-    state.unreadCount = (await unreadRes.json()).length;
-    state.rooms = roomsRes ? await roomsRes.json() : [];
-    state.totalMessages = health.messages ?? 0;
+    state.agents = await fetchWithCheck(`${config.server}/agents`, { headers: h });
+    state.messages = (await fetchWithCheck(`${config.server}/messages/${config.agent}/history?limit=20`, { headers: h })).reverse();
+    state.rooms = await fetchWithCheck(`${config.server}/rooms`, { headers: h }).catch(() => []);
     state.connected = true;
     state.error = null;
-    state.lastRefresh = new Date();
   } catch (err: any) {
     state.connected = false;
     state.error = err.message ?? "Connection failed";
   }
 }
 
+async function fetchChatMessages(config: Config, state: State): Promise<void> {
+  if (!state.chatWith) return;
+  try {
+    const h = { "content-type": "application/json", "x-mesh-secret": config.secret };
+    const all = await fetchWithCheck(`${config.server}/messages/${config.agent}/history?limit=100`, { headers: h });
+    state.chatMessages = all.filter((m: Message) => 
+      (m.from_agent === config.agent && m.to_agent === state.chatWith) ||
+      (m.from_agent === state.chatWith && m.to_agent === config.agent)
+    );
+  } catch (err: any) {
+    state.error = err.message;
+  }
+}
+
+async function fetchRoomMessages(config: Config, state: State): Promise<void> {
+  if (!state.currentRoom) return;
+  try {
+    const h = { "content-type": "application/json", "x-mesh-secret": config.secret };
+    state.roomMessages = await fetchWithCheck(`${config.server}/rooms/${state.currentRoom}/messages?limit=100`, { headers: h });
+  } catch (err: any) {
+    state.error = err.message;
+  }
+}
+
+async function sendMessage(config: Config, to: string, body: string): Promise<void> {
+  const h = { "content-type": "application/json", "x-mesh-secret": config.secret };
+  await fetchWithCheck(`${config.server}/messages`, {
+    method: "POST",
+    headers: h,
+    body: JSON.stringify({ from_agent: config.agent, to_agent: to, body }),
+  });
+}
+
+async function sendRoomMessage(config: Config, room: string, body: string): Promise<void> {
+  const h = { "content-type": "application/json", "x-mesh-secret": config.secret };
+  await fetchWithCheck(`${config.server}/rooms/${room}/messages`, {
+    method: "POST",
+    headers: h,
+    body: JSON.stringify({ from_agent: config.agent, body }),
+  });
+}
+
+async function createRoom(config: Config, name: string, members: string[]): Promise<void> {
+  const h = { "content-type": "application/json", "x-mesh-secret": config.secret };
+  await fetchWithCheck(`${config.server}/rooms`, {
+    method: "POST",
+    headers: h,
+    body: JSON.stringify({ name, members, mode: "free-form" }),
+  });
+}
+
 const trunc = (s: string, n: number) => s.length <= n ? s : s.slice(0, n - 1) + "…";
 const pad = (s: string, n: number) => {
-  // Account for ANSI codes in length calculation
   const visible = s.replace(/\x1b\[[0-9;]*m/g, "");
-  const diff = n - visible.length;
-  return diff > 0 ? s + " ".repeat(diff) : s;
+  return visible.length >= n ? s : s + " ".repeat(n - visible.length);
 };
-
-function timeAgo(iso: string): string {
+const timeAgo = (iso: string): string => {
   const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
   if (s < 60) return `${s}s`;
   if (s < 3600) return `${Math.floor(s / 60)}m`;
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   return `${Math.floor(s / 86400)}d`;
-}
-
+};
 const isOnline = (t: string) => Date.now() - new Date(t).getTime() < 30000;
 
-function render(config: Config, state: State): void {
-  const W = process.stdout.columns;
-  const H = process.stdout.rows;
-  if (W < 40 || H < 10) return;
-
+function renderDashboard(config: Config, state: State): string {
+  const W = process.stdout.columns, H = process.stdout.rows;
   let o = mv(1, 1);
 
-  // ── Header ──
   const connIcon = state.connected ? `${GRN}●${RST}` : `${RED}●${RST}`;
   const connText = state.connected ? `${GRN}connected${RST}` : `${RED}disconnected${RST}`;
-  const header = ` ${YEL}${BLD}meshterm${RST} ${DIM}${config.server}${RST}  ${connIcon} ${connText}  ${DIM}agent:${RST} ${config.agent}`;
-  o += ERASE_LINE + pad(header, W) + "\n";
+  o += ERASE_LINE + pad(` ${YEL}${BLD}meshterm${RST} ${DIM}${config.server}${RST}  ${connIcon} ${connText}`, W) + "\n";
 
-  // ── Top border ──
-  const leftW = Math.floor(W * 0.35);
-  const rightW = W - leftW - 1;
+  const leftW = Math.floor(W * 0.35), rightW = W - leftW - 1;
   o += ERASE_LINE + `${DIM}${"─".repeat(leftW)}┬${"─".repeat(rightW)}${RST}\n`;
 
-  // ── Panel headers ──
-  const agentHeader = state.focusedPanel === 0
-    ? `${INV}${YEL} Agents (${state.agents.length}) ${RST}`
-    : `${YEL}${BLD} Agents (${state.agents.length}) ${RST}`;
-  const msgHeader = state.focusedPanel === 1
-    ? `${INV}${YEL} Messages (${state.totalMessages}) ${RST}`
-    : `${YEL}${BLD} Messages (${state.totalMessages}) ${RST}`;
-
+  const agentHeader = state.focusedPanel === 0 ? `${INV}${YEL} Agents (${state.agents.length}) ${RST}` : `${YEL}${BLD} Agents ${RST}`;
+  const msgHeader = state.focusedPanel === 1 ? `${INV}${YEL} Messages ${RST}` : `${YEL}${BLD} Messages ${RST}`;
   o += ERASE_LINE + pad(agentHeader, leftW) + `${DIM}│${RST}` + pad(msgHeader, rightW) + "\n";
   o += ERASE_LINE + `${DIM}${"─".repeat(leftW)}┼${"─".repeat(rightW)}${RST}\n`;
 
-  // ── Content area ──
-  const contentH = H - 7; // header + borders + status
-
+  const contentH = H - 7;
   for (let i = 0; i < contentH; i++) {
-    // Left: agents
     let left = "";
     if (i < state.agents.length) {
       const a = state.agents[i];
-      const on = isOnline(a.last_seen);
-      const dot = on ? `${GRN}●${RST}` : `${RED}○${RST}`;
+      const sel = state.focusedPanel === 0 && i === state.selectedAgent;
+      const dot = isOnline(a.last_seen) ? `${GRN}●${RST}` : `${RED}○${RST}`;
       const name = trunc(a.name, 14);
       const type = `${DIM}${trunc(a.type, 8)}${RST}`;
       const ago = `${DIM}${timeAgo(a.last_seen)}${RST}`;
-      left = ` ${dot} ${name.padEnd(14)} ${type} ${ago}`;
+      left = sel ? `${INV} ${dot} ${name.padEnd(14)} ${type} ${ago}${RST}` : ` ${dot} ${name.padEnd(14)} ${type} ${ago}`;
     }
 
-    // Right: messages
     let right = "";
     if (i < state.messages.length) {
       const m = state.messages[i];
+      const sel = state.focusedPanel === 1 && i === state.selectedMessage;
       const dir = m.from_agent === config.agent ? `${CYN}→${RST}` : `${GRN}←${RST}`;
       const other = m.from_agent === config.agent ? m.to_agent : m.from_agent;
       const name = trunc(other, 12);
       const body = trunc(m.body.replace(/\n/g, " "), rightW - 22);
       const ago = `${DIM}${timeAgo(m.created_at)}${RST}`;
-      right = ` ${dir} ${name.padEnd(12)} ${body} ${ago}`;
+      right = sel ? `${INV} ${dir} ${name.padEnd(12)} ${body}${RST}` : ` ${dir} ${name.padEnd(12)} ${body} ${ago}`;
     }
 
     o += ERASE_LINE + pad(left, leftW) + `${DIM}│${RST}` + pad(right, rightW) + "\n";
   }
 
-  // ── Rooms row (if any) ──
   o += ERASE_LINE + `${DIM}${"─".repeat(leftW)}┴${"─".repeat(rightW)}${RST}\n`;
-
   if (state.rooms.length > 0) {
-    const roomList = state.rooms.map(r => `${CYN}#${r.name}${RST}${DIM}(${r.members.length})${RST}`).join("  ");
+    const roomList = state.rooms.map((r, i) => {
+      const sel = state.focusedPanel === 2 && i === state.selectedRoom;
+      return sel ? `${INV}${CYN}#${r.name}${RST}` : `${CYN}#${r.name}${RST}${DIM}(${r.members.length})${RST}`;
+    }).join("  ");
     o += ERASE_LINE + ` ${YEL}Rooms:${RST} ${roomList}\n`;
   } else {
     o += ERASE_LINE + "\n";
   }
 
-  // ── Status bar ──
-  const unreadBadge = state.unreadCount > 0 ? `${RED}${BLD}${state.unreadCount} unread${RST}` : `${DIM}0 unread${RST}`;
-  const refreshTime = state.lastRefresh ? `${DIM}${state.lastRefresh.toLocaleTimeString()}${RST}` : "";
-  const statusLeft = ` ${state.agents.length} agents  ${state.totalMessages} msgs  ${unreadBadge}  ${refreshTime}`;
-  const statusRight = `${DIM}q${RST}:quit  ${DIM}r${RST}:refresh  ${DIM}tab${RST}:focus `;
-  const statusGap = Math.max(0, W - statusLeft.replace(/\x1b\[[0-9;]*m/g, "").length - statusRight.replace(/\x1b\[[0-9;]*m/g, "").length);
-  o += ERASE_LINE + `${INV}${statusLeft}${" ".repeat(statusGap)}${statusRight}${RST}`;
+  const statusRight = `${DIM}q${RST}:quit ${DIM}r${RST}:refresh ${DIM}tab${RST}:focus ${DIM}↑↓${RST}:select ${DIM}Enter${RST}:open ${DIM}s${RST}:send ${DIM}c${RST}:room`;
+  o += ERASE_LINE + `${INV}${pad(" " + statusRight, W)}${RST}`;
 
-  // ── Error overlay ──
-  if (state.error) {
-    o += mv(H - 2, 2) + ERASE_LINE + `${RED}${BLD}Error: ${state.error}${RST}`;
+  if (state.error) o += mv(H - 2, 2) + ERASE_LINE + `${RED}${BLD}Error: ${state.error}${RST}`;
+  return o;
+}
+
+function renderChat(config: Config, state: State): string {
+  const W = process.stdout.columns, H = process.stdout.rows;
+  let o = mv(1, 1);
+
+  const connIcon = state.connected ? `${GRN}●${RST}` : `${RED}●${RST}`;
+  o += ERASE_LINE + pad(` ${YEL}${BLD}meshterm${RST} · chat with ${state.chatWith}  ${connIcon} ${state.connected ? "connected" : "disconnected"}`, W) + "\n";
+  o += ERASE_LINE + `${DIM}${"─".repeat(W)}${RST}\n`;
+
+  const contentH = H - 5;
+  const msgs = state.chatMessages.slice(-contentH - state.scrollOffset);
+  for (let i = 0; i < contentH; i++) {
+    if (i < msgs.length) {
+      const m = msgs[i];
+      const isMe = m.from_agent === config.agent;
+      const sender = isMe ? "you" : m.from_agent;
+      const body = m.body.replace(/\n/g, " ");
+      const ago = timeAgo(m.created_at);
+      o += ERASE_LINE + ` ${isMe ? CYN : GRN}${sender.padEnd(12)}${RST} ${trunc(body, W - 20)} ${DIM}${ago}${RST}\n`;
+    } else {
+      o += ERASE_LINE + "\n";
+    }
   }
 
-  process.stdout.write(o);
+  o += ERASE_LINE + `${DIM}${"─".repeat(W)}${RST}\n`;
+  o += ERASE_LINE + ` ${GRN}>${RST} ${state.inputBuffer}${DIM}${" ".repeat(Math.max(0, W - state.inputBuffer.length - 40))}Enter to send${RST}\n`;
+  o += ERASE_LINE + `${INV}${pad(` ${DIM}Esc${RST}:back ${DIM}↑↓${RST}:scroll`, W)}${RST}`;
+
+  if (state.error) o += mv(H - 2, 2) + ERASE_LINE + `${RED}${BLD}Error: ${state.error}${RST}`;
+  return o;
+}
+
+function renderRoom(config: Config, state: State): string {
+  const W = process.stdout.columns, H = process.stdout.rows;
+  let o = mv(1, 1);
+
+  const room = state.rooms.find(r => r.name === state.currentRoom);
+  const memberCount = room ? room.members.length : 0;
+  const connIcon = state.connected ? `${GRN}●${RST}` : `${RED}●${RST}`;
+  o += ERASE_LINE + pad(` ${YEL}${BLD}meshterm${RST} · ${CYN}#${state.currentRoom}${RST} ${DIM}(${memberCount} members)${RST}  ${connIcon} ${state.connected ? "connected" : "disconnected"}`, W) + "\n";
+  o += ERASE_LINE + `${DIM}${"─".repeat(W)}${RST}\n`;
+
+  const contentH = H - 5;
+  const msgs = state.roomMessages.slice(-contentH - state.scrollOffset);
+  for (let i = 0; i < contentH; i++) {
+    if (i < msgs.length) {
+      const m = msgs[i];
+      const body = m.body.replace(/\n/g, " ");
+      const ago = timeAgo(m.created_at);
+      o += ERASE_LINE + ` ${CYN}${trunc(m.from_agent, 12).padEnd(12)}${RST} ${trunc(body, W - 20)} ${DIM}${ago}${RST}\n`;
+    } else {
+      o += ERASE_LINE + "\n";
+    }
+  }
+
+  o += ERASE_LINE + `${DIM}${"─".repeat(W)}${RST}\n`;
+  o += ERASE_LINE + ` ${GRN}>${RST} ${state.inputBuffer}${DIM}${" ".repeat(Math.max(0, W - state.inputBuffer.length - 40))}Enter to send${RST}\n`;
+  o += ERASE_LINE + `${INV}${pad(` ${DIM}Esc${RST}:back ${DIM}↑↓${RST}:scroll`, W)}${RST}`;
+
+  if (state.error) o += mv(H - 2, 2) + ERASE_LINE + `${RED}${BLD}Error: ${state.error}${RST}`;
+  return o;
+}
+
+function render(config: Config, state: State): void {
+  let output = "";
+  if (state.view === "dashboard") output = renderDashboard(config, state);
+  else if (state.view === "chat") output = renderChat(config, state);
+  else if (state.view === "room") output = renderRoom(config, state);
+  process.stdout.write(output);
 }
 
 async function main() {
@@ -183,13 +276,16 @@ async function main() {
   if (!config) { console.error("❌ Not configured. Run: meshterm init"); process.exit(1); }
 
   const state: State = {
+    view: "dashboard",
     agents: [], messages: [], rooms: [],
     connected: false, error: null,
-    totalMessages: 0, unreadCount: 0,
-    focusedPanel: 0, lastRefresh: new Date(),
+    focusedPanel: 0,
+    selectedAgent: 0, selectedMessage: 0, selectedRoom: 0,
+    chatWith: null, chatMessages: [],
+    currentRoom: null, roomMessages: [],
+    inputBuffer: "", scrollOffset: 0,
   };
 
-  // Alternate screen + raw mode
   process.stdout.write(ALT_ON + HIDE);
   if (process.stdin.isTTY) process.stdin.setRawMode(true);
   process.stdin.resume();
@@ -200,19 +296,127 @@ async function main() {
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
   };
 
-  process.stdin.on("data", (key: string) => {
+  let escapeSeq = "";
+
+  process.stdin.on("data", async (key: string) => {
+    // Escape sequence handling
+    if (key === "\x1b") { escapeSeq = key; return; }
+    if (escapeSeq) {
+      escapeSeq += key;
+      if (escapeSeq === "\x1b[A") { // Up
+        if (state.view === "dashboard") {
+          if (state.focusedPanel === 0 && state.selectedAgent > 0) state.selectedAgent--;
+          else if (state.focusedPanel === 1 && state.selectedMessage > 0) state.selectedMessage--;
+          else if (state.focusedPanel === 2 && state.selectedRoom > 0) state.selectedRoom--;
+        } else {
+          state.scrollOffset = Math.min(state.scrollOffset + 1, 50);
+        }
+        escapeSeq = "";
+        render(config, state);
+        return;
+      }
+      if (escapeSeq === "\x1b[B") { // Down
+        if (state.view === "dashboard") {
+          if (state.focusedPanel === 0 && state.selectedAgent < state.agents.length - 1) state.selectedAgent++;
+          else if (state.focusedPanel === 1 && state.selectedMessage < state.messages.length - 1) state.selectedMessage++;
+          else if (state.focusedPanel === 2 && state.selectedRoom < state.rooms.length - 1) state.selectedRoom++;
+        } else {
+          state.scrollOffset = Math.max(state.scrollOffset - 1, 0);
+        }
+        escapeSeq = "";
+        render(config, state);
+        return;
+      }
+      if (escapeSeq.length > 3) escapeSeq = "";
+      return;
+    }
+
+    // Quit
     if (key === "q" || key === "\u0003") { cleanup(); process.exit(0); }
-    if (key === "r") fetchData(config, state).then(() => render(config, state));
-    if (key === "\t") { state.focusedPanel = (state.focusedPanel + 1) % 2; render(config, state); }
+
+    // Dashboard controls
+    if (state.view === "dashboard") {
+      if (key === "r") { await fetchDashboard(config, state); render(config, state); }
+      if (key === "\t") { state.focusedPanel = (state.focusedPanel + 1) % 3; render(config, state); }
+      if (key === "\r" || key === "\n") {
+        if (state.focusedPanel === 0 && state.agents[state.selectedAgent]) {
+          state.chatWith = state.agents[state.selectedAgent].name;
+          state.view = "chat";
+          state.inputBuffer = "";
+          state.scrollOffset = 0;
+          await fetchChatMessages(config, state);
+          render(config, state);
+        } else if (state.focusedPanel === 2 && state.rooms[state.selectedRoom]) {
+          state.currentRoom = state.rooms[state.selectedRoom].name;
+          state.view = "room";
+          state.inputBuffer = "";
+          state.scrollOffset = 0;
+          await fetchRoomMessages(config, state);
+          render(config, state);
+        }
+      }
+      if (key === "s") {
+        // TODO: Implement compose dialog
+        state.error = "Compose not yet implemented - use Enter on agent";
+        render(config, state);
+      }
+      if (key === "c") {
+        // TODO: Implement create room dialog
+        state.error = "Create room not yet implemented";
+        render(config, state);
+      }
+    }
+
+    // Chat/Room input
+    if (state.view === "chat" || state.view === "room") {
+      if (key === "\x1b") { // Escape
+        state.view = "dashboard";
+        state.inputBuffer = "";
+        state.scrollOffset = 0;
+        await fetchDashboard(config, state);
+        render(config, state);
+        return;
+      }
+      if (key === "\r" || key === "\n") {
+        if (state.inputBuffer.trim()) {
+          try {
+            if (state.view === "chat" && state.chatWith) {
+              await sendMessage(config, state.chatWith, state.inputBuffer);
+              await fetchChatMessages(config, state);
+            } else if (state.view === "room" && state.currentRoom) {
+              await sendRoomMessage(config, state.currentRoom, state.inputBuffer);
+              await fetchRoomMessages(config, state);
+            }
+            state.inputBuffer = "";
+            state.error = null;
+          } catch (err: any) {
+            state.error = err.message;
+          }
+          render(config, state);
+        }
+      } else if (key === "\x7f" || key === "\x08") { // Backspace
+        state.inputBuffer = state.inputBuffer.slice(0, -1);
+        render(config, state);
+      } else if (key.length === 1 && key >= " ") {
+        state.inputBuffer += key;
+        render(config, state);
+      }
+    }
   });
 
   process.on("SIGINT", () => { cleanup(); process.exit(0); });
   process.on("exit", cleanup);
   process.stdout.on("resize", () => render(config, state));
 
-  await fetchData(config, state);
+  await fetchDashboard(config, state);
   render(config, state);
-  setInterval(async () => { await fetchData(config, state); render(config, state); }, 3000);
+  
+  setInterval(async () => {
+    if (state.view === "dashboard") await fetchDashboard(config, state);
+    else if (state.view === "chat") await fetchChatMessages(config, state);
+    else if (state.view === "room") await fetchRoomMessages(config, state);
+    render(config, state);
+  }, 3000);
 }
 
 main();
