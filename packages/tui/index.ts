@@ -16,7 +16,7 @@ interface Message { id: string; from_agent: string; to_agent: string; body: stri
 interface Room { name: string; members: string[]; mode: string; last_activity: string; }
 interface RoomMessage { id: string; room: string; from_agent: string; body: string; created_at: string; }
 
-type View = "dashboard" | "chat" | "room";
+type View = "dashboard" | "chat" | "room" | "compose" | "create-room";
 
 interface State {
   view: View;
@@ -35,6 +35,15 @@ interface State {
   roomMessages: RoomMessage[];
   inputBuffer: string;
   scrollOffset: number;
+  composeTo: string;
+  composeMessage: string;
+  composeField: number;
+  roomCreateName: string;
+  roomCreateMembers: string;
+  roomCreateMode: number;
+  roomCreateField: number;
+  hasNewMessages: boolean;
+  lastMessageCount: number;
 }
 
 // ANSI
@@ -64,7 +73,16 @@ async function fetchDashboard(config: Config, state: State): Promise<void> {
   try {
     const h = { "content-type": "application/json", "x-mesh-secret": config.secret };
     state.agents = await fetchWithCheck(`${config.server}/agents`, { headers: h });
-    state.messages = (await fetchWithCheck(`${config.server}/messages/${config.agent}/history?limit=20`, { headers: h })).reverse();
+    const newMessages = (await fetchWithCheck(`${config.server}/messages/${config.agent}/history?limit=20`, { headers: h })).reverse();
+    
+    // Detect new messages
+    if (state.lastMessageCount > 0 && newMessages.length > state.lastMessageCount) {
+      state.hasNewMessages = true;
+      setTimeout(() => { state.hasNewMessages = false; }, 3000); // Flash for 1 refresh cycle
+    }
+    state.lastMessageCount = newMessages.length;
+    state.messages = newMessages;
+    
     state.rooms = await fetchWithCheck(`${config.server}/rooms`, { headers: h }).catch(() => []);
     state.connected = true;
     state.error = null;
@@ -151,7 +169,9 @@ function renderDashboard(config: Config, state: State): string {
   o += ERASE_LINE + `${DIM}${"─".repeat(leftW)}┬${"─".repeat(rightW)}${RST}\n`;
 
   const agentHeader = state.focusedPanel === 0 ? `${INV}${YEL} Agents (${state.agents.length}) ${RST}` : `${YEL}${BLD} Agents ${RST}`;
-  const msgHeader = state.focusedPanel === 1 ? `${INV}${YEL} Messages ${RST}` : `${YEL}${BLD} Messages ${RST}`;
+  const unreadCount = state.messages.filter(m => !m.read).length;
+  const newBadge = state.hasNewMessages ? ` ${RED}${BLD}NEW${RST}` : "";
+  const msgHeader = state.focusedPanel === 1 ? `${INV}${YEL} Messages (${unreadCount} unread)${newBadge} ${RST}` : `${YEL}${BLD} Messages ${RST}${DIM}(${unreadCount})${RST}${newBadge}`;
   o += ERASE_LINE + pad(agentHeader, leftW) + `${DIM}│${RST}` + pad(msgHeader, rightW) + "\n";
   o += ERASE_LINE + `${DIM}${"─".repeat(leftW)}┼${"─".repeat(rightW)}${RST}\n`;
 
@@ -175,9 +195,14 @@ function renderDashboard(config: Config, state: State): string {
       const dir = m.from_agent === config.agent ? `${CYN}→${RST}` : `${GRN}←${RST}`;
       const other = m.from_agent === config.agent ? m.to_agent : m.from_agent;
       const name = trunc(other, 12);
-      const body = trunc(m.body.replace(/\n/g, " "), rightW - 22);
+      const bodyMaxLen = rightW - 18; // More space for message body
+      const body = trunc(m.body.replace(/\n/g, " "), bodyMaxLen);
       const ago = `${DIM}${timeAgo(m.created_at)}${RST}`;
-      right = sel ? `${INV} ${dir} ${name.padEnd(12)} ${body}${RST}` : ` ${dir} ${name.padEnd(12)} ${body} ${ago}`;
+      
+      // Unread messages in bold/bright white
+      const bodyText = m.read ? body : `${BLD}${body}${RST}`;
+      
+      right = sel ? `${INV} ${dir} ${name.padEnd(12)} ${bodyText}${RST}` : ` ${dir} ${name.padEnd(12)} ${bodyText} ${ago}`;
     }
 
     o += ERASE_LINE + pad(left, leftW) + `${DIM}│${RST}` + pad(right, rightW) + "\n";
@@ -195,7 +220,8 @@ function renderDashboard(config: Config, state: State): string {
   }
 
   const statusRight = `${DIM}q${RST}:quit ${DIM}r${RST}:refresh ${DIM}tab${RST}:focus ${DIM}↑↓${RST}:select ${DIM}Enter${RST}:open ${DIM}s${RST}:send ${DIM}c${RST}:room`;
-  o += ERASE_LINE + `${INV}${pad(" " + statusRight, W)}${RST}`;
+  const statusLine = state.hasNewMessages ? `${INV}${pad(" " + statusRight, W)}${RST}` : `${INV}${pad(" " + statusRight, W)}${RST}`;
+  o += ERASE_LINE + statusLine;
 
   if (state.error) o += mv(H - 2, 2) + ERASE_LINE + `${RED}${BLD}Error: ${state.error}${RST}`;
   return o;
@@ -294,11 +320,101 @@ function renderRoom(config: Config, state: State): string {
   return o;
 }
 
+function renderCompose(config: Config, state: State): string {
+  const W = process.stdout.columns, H = process.stdout.rows;
+  let o = mv(1, 1);
+
+  o += ERASE_LINE + pad(` ${YEL}${BLD}Compose Message${RST}`, W) + "\n";
+  o += ERASE_LINE + `${DIM}${"─".repeat(W)}${RST}\n`;
+  o += ERASE_LINE + "\n";
+
+  // To field
+  const toLabel = state.composeField === 0 ? `${INV}${YEL} To: ${RST}` : `${YEL} To: ${RST}`;
+  o += ERASE_LINE + ` ${toLabel} ${state.composeTo}\n`;
+  
+  // Show agent hints
+  if (state.composeField === 0 && state.composeTo.length > 0) {
+    const matches = state.agents.filter(a => a.name.toLowerCase().includes(state.composeTo.toLowerCase())).slice(0, 5);
+    if (matches.length > 0) {
+      o += ERASE_LINE + `   ${DIM}Hints: ${matches.map(a => a.name).join(", ")}${RST}\n`;
+    } else {
+      o += ERASE_LINE + "\n";
+    }
+  } else {
+    o += ERASE_LINE + "\n";
+  }
+
+  o += ERASE_LINE + "\n";
+
+  // Message field
+  const msgLabel = state.composeField === 1 ? `${INV}${YEL} Message: ${RST}` : `${YEL} Message: ${RST}`;
+  o += ERASE_LINE + ` ${msgLabel}\n`;
+  
+  // Multi-line message display
+  const msgLines = state.composeMessage.split("\n");
+  const displayH = Math.min(msgLines.length, H - 12);
+  for (let i = 0; i < displayH; i++) {
+    o += ERASE_LINE + `   ${msgLines[i]}\n`;
+  }
+  
+  // Fill remaining space
+  for (let i = displayH; i < H - 11; i++) {
+    o += ERASE_LINE + "\n";
+  }
+
+  o += ERASE_LINE + `${DIM}${"─".repeat(W)}${RST}\n`;
+  o += ERASE_LINE + `${INV}${pad(` ${DIM}Tab${RST}:switch field ${DIM}Enter${RST}:send ${DIM}Esc${RST}:cancel`, W)}${RST}`;
+
+  if (state.error) o += mv(H - 2, 2) + ERASE_LINE + `${RED}${BLD}Error: ${state.error}${RST}`;
+  return o;
+}
+
+function renderCreateRoom(config: Config, state: State): string {
+  const W = process.stdout.columns, H = process.stdout.rows;
+  let o = mv(1, 1);
+
+  const modes = ["free-form", "round-robin", "reactive", "moderated"];
+
+  o += ERASE_LINE + pad(` ${YEL}${BLD}Create Room${RST}`, W) + "\n";
+  o += ERASE_LINE + `${DIM}${"─".repeat(W)}${RST}\n`;
+  o += ERASE_LINE + "\n";
+
+  // Name field
+  const nameLabel = state.roomCreateField === 0 ? `${INV}${YEL} Name: ${RST}` : `${YEL} Name: ${RST}`;
+  o += ERASE_LINE + ` ${nameLabel} ${state.roomCreateName}\n`;
+  o += ERASE_LINE + "\n";
+
+  // Members field
+  const membersLabel = state.roomCreateField === 1 ? `${INV}${YEL} Members: ${RST}` : `${YEL} Members: ${RST}`;
+  o += ERASE_LINE + ` ${membersLabel} ${state.roomCreateMembers}\n`;
+  o += ERASE_LINE + `   ${DIM}(comma-separated agent names)${RST}\n`;
+  o += ERASE_LINE + "\n";
+
+  // Mode field
+  const modeLabel = state.roomCreateField === 2 ? `${INV}${YEL} Mode: ${RST}` : `${YEL} Mode: ${RST}`;
+  const currentMode = modes[state.roomCreateMode];
+  o += ERASE_LINE + ` ${modeLabel} ${currentMode}\n`;
+  o += ERASE_LINE + `   ${DIM}(Tab on this field to cycle)${RST}\n`;
+
+  // Fill remaining space
+  for (let i = 0; i < H - 14; i++) {
+    o += ERASE_LINE + "\n";
+  }
+
+  o += ERASE_LINE + `${DIM}${"─".repeat(W)}${RST}\n`;
+  o += ERASE_LINE + `${INV}${pad(` ${DIM}Tab${RST}:next field ${DIM}Enter${RST}:create ${DIM}Esc${RST}:cancel`, W)}${RST}`;
+
+  if (state.error) o += mv(H - 2, 2) + ERASE_LINE + `${RED}${BLD}Error: ${state.error}${RST}`;
+  return o;
+}
+
 function render(config: Config, state: State): void {
   let output = "";
   if (state.view === "dashboard") output = renderDashboard(config, state);
   else if (state.view === "chat") output = renderChat(config, state);
   else if (state.view === "room") output = renderRoom(config, state);
+  else if (state.view === "compose") output = renderCompose(config, state);
+  else if (state.view === "create-room") output = renderCreateRoom(config, state);
   process.stdout.write(output);
 }
 
@@ -315,6 +431,9 @@ async function main() {
     chatWith: null, chatMessages: [],
     currentRoom: null, roomMessages: [],
     inputBuffer: "", scrollOffset: 0,
+    composeTo: "", composeMessage: "", composeField: 0,
+    roomCreateName: "", roomCreateMembers: "", roomCreateMode: 0, roomCreateField: 0,
+    hasNewMessages: false, lastMessageCount: 0,
   };
 
   process.stdout.write(ALT_ON + HIDE);
@@ -354,13 +473,28 @@ async function main() {
       return;
     }
 
-    // Bare Escape key (for exiting chat/room)
+    // Bare Escape key (for exiting chat/room/compose/create-room)
     if (key === "\x1b") {
       if (state.view === "chat" || state.view === "room") {
         state.view = "dashboard";
         state.inputBuffer = "";
         state.scrollOffset = 0;
         await fetchDashboard(config, state);
+        render(config, state);
+      } else if (state.view === "compose") {
+        state.view = "dashboard";
+        state.composeTo = "";
+        state.composeMessage = "";
+        state.composeField = 0;
+        state.error = null;
+        render(config, state);
+      } else if (state.view === "create-room") {
+        state.view = "dashboard";
+        state.roomCreateName = "";
+        state.roomCreateMembers = "";
+        state.roomCreateMode = 0;
+        state.roomCreateField = 0;
+        state.error = null;
         render(config, state);
       }
       return;
@@ -391,13 +525,20 @@ async function main() {
         }
       }
       if (key === "s") {
-        // TODO: Implement compose dialog
-        state.error = "Compose not yet implemented - use Enter on agent";
+        state.view = "compose";
+        state.composeTo = "";
+        state.composeMessage = "";
+        state.composeField = 0;
+        state.error = null;
         render(config, state);
       }
       if (key === "c") {
-        // TODO: Implement create room dialog
-        state.error = "Create room not yet implemented";
+        state.view = "create-room";
+        state.roomCreateName = "";
+        state.roomCreateMembers = "";
+        state.roomCreateMode = 0;
+        state.roomCreateField = 0;
+        state.error = null;
         render(config, state);
       }
     }
@@ -426,6 +567,114 @@ async function main() {
         render(config, state);
       } else if (key.length === 1 && key >= " ") {
         state.inputBuffer += key;
+        render(config, state);
+      }
+    }
+
+    // Compose dialog input
+    if (state.view === "compose") {
+      if (key === "\t") {
+        state.composeField = (state.composeField + 1) % 2;
+        render(config, state);
+      } else if (key === "\r" || key === "\n") {
+        if (state.composeTo.trim() && state.composeMessage.trim()) {
+          try {
+            await sendMessage(config, state.composeTo.trim(), state.composeMessage.trim());
+            state.view = "dashboard";
+            state.composeTo = "";
+            state.composeMessage = "";
+            state.composeField = 0;
+            state.error = null;
+            await fetchDashboard(config, state);
+            render(config, state);
+          } catch (err: any) {
+            state.error = err.message;
+            render(config, state);
+          }
+        } else {
+          state.error = "Both To and Message fields are required";
+          render(config, state);
+        }
+      } else if (key === "\x7f" || key === "\x08") { // Backspace
+        if (state.composeField === 0) {
+          state.composeTo = state.composeTo.slice(0, -1);
+        } else {
+          state.composeMessage = state.composeMessage.slice(0, -1);
+        }
+        render(config, state);
+      } else if (key.length === 1 && key >= " ") {
+        if (state.composeField === 0) {
+          state.composeTo += key;
+        } else {
+          state.composeMessage += key;
+        }
+        render(config, state);
+      }
+    }
+
+    // Create room dialog input
+    if (state.view === "create-room") {
+      const modes = ["free-form", "round-robin", "reactive", "moderated"];
+      
+      if (key === "\t") {
+        if (state.roomCreateField === 2) {
+          // On mode field, cycle through modes
+          state.roomCreateMode = (state.roomCreateMode + 1) % modes.length;
+        } else {
+          // Switch to next field
+          state.roomCreateField = (state.roomCreateField + 1) % 3;
+        }
+        render(config, state);
+      } else if (key === "\r" || key === "\n") {
+        if (state.roomCreateName.trim() && state.roomCreateMembers.trim()) {
+          try {
+            const members = state.roomCreateMembers.split(",").map(m => m.trim()).filter(m => m.length > 0);
+            if (members.length === 0) {
+              state.error = "At least one member is required";
+              render(config, state);
+              return;
+            }
+            
+            const h = { "content-type": "application/json", "x-mesh-secret": config.secret };
+            await fetchWithCheck(`${config.server}/rooms`, {
+              method: "POST",
+              headers: h,
+              body: JSON.stringify({ 
+                name: state.roomCreateName.trim(), 
+                members, 
+                mode: modes[state.roomCreateMode] 
+              }),
+            });
+            
+            state.view = "dashboard";
+            state.roomCreateName = "";
+            state.roomCreateMembers = "";
+            state.roomCreateMode = 0;
+            state.roomCreateField = 0;
+            state.error = null;
+            await fetchDashboard(config, state);
+            render(config, state);
+          } catch (err: any) {
+            state.error = err.message;
+            render(config, state);
+          }
+        } else {
+          state.error = "Name and Members fields are required";
+          render(config, state);
+        }
+      } else if (key === "\x7f" || key === "\x08") { // Backspace
+        if (state.roomCreateField === 0) {
+          state.roomCreateName = state.roomCreateName.slice(0, -1);
+        } else if (state.roomCreateField === 1) {
+          state.roomCreateMembers = state.roomCreateMembers.slice(0, -1);
+        }
+        render(config, state);
+      } else if (key.length === 1 && key >= " ") {
+        if (state.roomCreateField === 0) {
+          state.roomCreateName += key;
+        } else if (state.roomCreateField === 1) {
+          state.roomCreateMembers += key;
+        }
         render(config, state);
       }
     }
