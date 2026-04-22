@@ -260,6 +260,7 @@ Commands:
   poll                                    Check for unread messages
   agents                                  List registered agents
   status                                  Show mesh status (agents, messages, health)
+  tui                                     Launch terminal dashboard
   server start                            Start the mesh server
   client start --agent <name> --session <tmux>  Start the tmux inject client
 
@@ -267,6 +268,7 @@ Examples:
   meshterm init --server https://mesh.example.com --key xxx --agent kaze
   meshterm send kiro-mac "refactor auth module"
   meshterm poll
+  meshterm tui
   meshterm client start --agent kiro-vps --session kiro
 `);
 }

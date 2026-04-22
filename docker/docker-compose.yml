@@ -3,7 +3,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: meshterm
+    container_name: agent-mesh
     restart: unless-stopped
     ports:
       - "127.0.0.1:4200:4200"
