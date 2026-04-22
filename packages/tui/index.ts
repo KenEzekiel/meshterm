@@ -210,18 +210,34 @@ function renderChat(config: Config, state: State): string {
   o += ERASE_LINE + `${DIM}${"─".repeat(W)}${RST}\n`;
 
   const contentH = H - 5;
-  const msgs = state.chatMessages.slice(-contentH - state.scrollOffset);
-  for (let i = 0; i < contentH; i++) {
-    if (i < msgs.length) {
-      const m = msgs[i];
-      const isMe = m.from_agent === config.agent;
-      const sender = isMe ? "you" : m.from_agent;
-      const body = m.body.replace(/\n/g, " ");
-      const ago = timeAgo(m.created_at);
-      o += ERASE_LINE + ` ${isMe ? CYN : GRN}${sender.padEnd(12)}${RST} ${trunc(body, W - 20)} ${DIM}${ago}${RST}\n`;
+  const bodyW = W - 20; // space for sender + timestamp
+
+  // Build wrapped lines from messages
+  const lines: string[] = [];
+  for (const m of state.chatMessages) {
+    const isMe = m.from_agent === config.agent;
+    const sender = isMe ? "you" : m.from_agent;
+    const body = m.body.replace(/\n/g, " ");
+    const ago = timeAgo(m.created_at);
+
+    if (body.length <= bodyW) {
+      lines.push(`${isMe ? CYN : GRN}${sender.padEnd(12)}${RST} ${body} ${DIM}${ago}${RST}`);
     } else {
-      o += ERASE_LINE + "\n";
+      // Wrap long messages
+      const chunks = [];
+      for (let j = 0; j < body.length; j += bodyW) {
+        chunks.push(body.slice(j, j + bodyW));
+      }
+      lines.push(`${isMe ? CYN : GRN}${sender.padEnd(12)}${RST} ${chunks[0]} ${DIM}${ago}${RST}`);
+      for (let j = 1; j < chunks.length; j++) {
+        lines.push(`${" ".repeat(13)}${chunks[j]}`);
+      }
     }
+  }
+
+  const visible = lines.slice(Math.max(0, lines.length - contentH - state.scrollOffset), lines.length - state.scrollOffset);
+  for (let i = 0; i < contentH; i++) {
+    o += ERASE_LINE + (i < visible.length ? ` ${visible[i]}` : "") + "\n";
   }
 
   o += ERASE_LINE + `${DIM}${"─".repeat(W)}${RST}\n`;
@@ -243,16 +259,31 @@ function renderRoom(config: Config, state: State): string {
   o += ERASE_LINE + `${DIM}${"─".repeat(W)}${RST}\n`;
 
   const contentH = H - 5;
-  const msgs = state.roomMessages.slice(-contentH - state.scrollOffset);
-  for (let i = 0; i < contentH; i++) {
-    if (i < msgs.length) {
-      const m = msgs[i];
-      const body = m.body.replace(/\n/g, " ");
-      const ago = timeAgo(m.created_at);
-      o += ERASE_LINE + ` ${CYN}${trunc(m.from_agent, 12).padEnd(12)}${RST} ${trunc(body, W - 20)} ${DIM}${ago}${RST}\n`;
+  const bodyW = W - 20;
+
+  // Build wrapped lines from room messages
+  const lines: string[] = [];
+  for (const m of state.roomMessages) {
+    const body = m.body.replace(/\n/g, " ");
+    const ago = timeAgo(m.created_at);
+
+    if (body.length <= bodyW) {
+      lines.push(`${CYN}${trunc(m.from_agent, 12).padEnd(12)}${RST} ${body} ${DIM}${ago}${RST}`);
     } else {
-      o += ERASE_LINE + "\n";
+      const chunks = [];
+      for (let j = 0; j < body.length; j += bodyW) {
+        chunks.push(body.slice(j, j + bodyW));
+      }
+      lines.push(`${CYN}${trunc(m.from_agent, 12).padEnd(12)}${RST} ${chunks[0]} ${DIM}${ago}${RST}`);
+      for (let j = 1; j < chunks.length; j++) {
+        lines.push(`${" ".repeat(13)}${chunks[j]}`);
+      }
     }
+  }
+
+  const visible = lines.slice(Math.max(0, lines.length - contentH - state.scrollOffset), lines.length - state.scrollOffset);
+  for (let i = 0; i < contentH; i++) {
+    o += ERASE_LINE + (i < visible.length ? ` ${visible[i]}` : "") + "\n";
   }
 
   o += ERASE_LINE + `${DIM}${"─".repeat(W)}${RST}\n`;

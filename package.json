@@ -1,6 +1,6 @@
 {
   "name": "meshterm",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Agent-agnostic communication layer for AI agents",
   "type": "module",
   "bin": {
