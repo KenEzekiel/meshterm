@@ -10,296 +10,209 @@ import { join } from "path";
 const CONFIG_DIR = join(process.env.HOME ?? "~", ".meshterm");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
-interface Config {
-  server: string;
-  secret: string;
-  agent: string;
-}
-
-interface Agent {
-  name: string;
-  type: string;
-  host: string;
-  last_seen: string;
-}
-
-interface Message {
-  id: number;
-  from_agent: string;
-  to_agent: string;
-  body: string;
-  created_at: string;
-  read: boolean;
-}
+interface Config { server: string; secret: string; agent: string; }
+interface Agent { name: string; type: string; host: string; last_seen: string; }
+interface Message { id: string; from_agent: string; to_agent: string; body: string; created_at: string; read: boolean; }
+interface Room { name: string; members: string[]; mode: string; last_activity: string; }
 
 interface State {
   agents: Agent[];
   messages: Message[];
+  rooms: Room[];
   connected: boolean;
   error: string | null;
   totalMessages: number;
   unreadCount: number;
-  focusedPanel: "agents" | "messages";
+  focusedPanel: number;
+  lastRefresh: Date;
 }
 
-// ANSI escape codes
-const CLEAR = "\x1b[2J";
-const HIDE_CURSOR = "\x1b[?25l";
-const SHOW_CURSOR = "\x1b[?25h";
-const RESET = "\x1b[0m";
-const GREEN = "\x1b[32m";
+// ANSI
+const ALT_ON = "\x1b[?1049h";
+const ALT_OFF = "\x1b[?1049l";
+const HIDE = "\x1b[?25l";
+const SHOW = "\x1b[?25h";
+const RST = "\x1b[0m";
+const GRN = "\x1b[32m";
 const RED = "\x1b[31m";
-const YELLOW = "\x1b[33m";
+const YEL = "\x1b[33m";
+const CYN = "\x1b[36m";
 const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
+const BLD = "\x1b[1m";
+const INV = "\x1b[7m";
+const ERASE_LINE = "\x1b[2K";
 
-function moveCursor(row: number, col: number): string {
-  return `\x1b[${row};${col}H`;
-}
+const mv = (r: number, c: number) => `\x1b[${r};${c}H`;
 
 function loadConfig(): Config | null {
   if (!existsSync(CONFIG_FILE)) return null;
-  try {
-    return JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
-  } catch {
-    return null;
-  }
+  try { return JSON.parse(readFileSync(CONFIG_FILE, "utf-8")); } catch { return null; }
 }
 
 async function fetchData(config: Config, state: State): Promise<void> {
   try {
-    const headers = {
-      "content-type": "application/json",
-      "x-mesh-secret": config.secret,
-    };
-
-    // Fetch health
-    const healthRes = await fetch(`${config.server}/health`, { headers });
+    const h = { "content-type": "application/json", "x-mesh-secret": config.secret };
+    const [healthRes, agentsRes, msgsRes, unreadRes, roomsRes] = await Promise.all([
+      fetch(`${config.server}/health`, { headers: h }),
+      fetch(`${config.server}/agents`, { headers: h }),
+      fetch(`${config.server}/messages/${config.agent}/history?limit=20`, { headers: h }),
+      fetch(`${config.server}/messages/${config.agent}?unread=true`, { headers: h }),
+      fetch(`${config.server}/rooms`, { headers: h }).catch(() => null),
+    ]);
     const health = await healthRes.json();
-
-    // Fetch agents
-    const agentsRes = await fetch(`${config.server}/agents`, { headers });
-    const agents = await agentsRes.json();
-
-    // Fetch messages history
-    const messagesRes = await fetch(
-      `${config.server}/messages/${config.agent}/history?limit=20`,
-      { headers }
-    );
-    const messages = await messagesRes.json();
-
-    // Fetch unread count
-    const unreadRes = await fetch(
-      `${config.server}/messages/${config.agent}?unread=true`,
-      { headers }
-    );
-    const unread = await unreadRes.json();
-
-    state.agents = agents;
-    state.messages = messages;
+    state.agents = await agentsRes.json();
+    state.messages = (await msgsRes.json()).reverse();
+    state.unreadCount = (await unreadRes.json()).length;
+    state.rooms = roomsRes ? await roomsRes.json() : [];
     state.totalMessages = health.messages ?? 0;
-    state.unreadCount = unread.length;
     state.connected = true;
     state.error = null;
-  } catch (err) {
+    state.lastRefresh = new Date();
+  } catch (err: any) {
     state.connected = false;
-    state.error = err instanceof Error ? err.message : "Connection failed";
+    state.error = err.message ?? "Connection failed";
   }
 }
 
-function truncate(str: string, maxLen: number): string {
-  if (str.length <= maxLen) return str;
-  return str.slice(0, maxLen - 3) + "...";
+const trunc = (s: string, n: number) => s.length <= n ? s : s.slice(0, n - 1) + "…";
+const pad = (s: string, n: number) => {
+  // Account for ANSI codes in length calculation
+  const visible = s.replace(/\x1b\[[0-9;]*m/g, "");
+  const diff = n - visible.length;
+  return diff > 0 ? s + " ".repeat(diff) : s;
+};
+
+function timeAgo(iso: string): string {
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d`;
 }
 
-function formatTimestamp(isoDate: string): string {
-  const date = new Date(isoDate);
-  const now = new Date();
-  const diff = now.getTime() - date.getTime();
-  const seconds = Math.floor(diff / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-
-  if (seconds < 60) return `${seconds}s ago`;
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  return `${days}d ago`;
-}
-
-function isOnline(lastSeen: string): boolean {
-  const date = new Date(lastSeen);
-  const now = new Date();
-  const diff = now.getTime() - date.getTime();
-  return diff < 30000; // 30 seconds
-}
+const isOnline = (t: string) => Date.now() - new Date(t).getTime() < 30000;
 
 function render(config: Config, state: State): void {
-  const { columns, rows } = process.stdout;
-  const width = columns;
-  const height = rows;
+  const W = process.stdout.columns;
+  const H = process.stdout.rows;
+  if (W < 40 || H < 10) return;
 
-  let output = CLEAR + HIDE_CURSOR;
+  let o = mv(1, 1);
 
-  // Header
-  const headerLine = 1;
-  const statusColor = state.connected ? GREEN : RED;
-  const statusText = state.connected ? "CONNECTED" : "DISCONNECTED";
-  output += moveCursor(headerLine, 1);
-  output += `${YELLOW}${BOLD}meshterm${RESET} ${DIM}${config.server}${RESET} ${statusColor}●${RESET} ${statusText}`;
+  // ── Header ──
+  const connIcon = state.connected ? `${GRN}●${RST}` : `${RED}●${RST}`;
+  const connText = state.connected ? `${GRN}connected${RST}` : `${RED}disconnected${RST}`;
+  const header = ` ${YEL}${BLD}meshterm${RST} ${DIM}${config.server}${RST}  ${connIcon} ${connText}  ${DIM}agent:${RST} ${config.agent}`;
+  o += ERASE_LINE + pad(header, W) + "\n";
 
-  // Draw top border
-  const borderLine = 2;
-  output += moveCursor(borderLine, 1);
-  output += "┌" + "─".repeat(width - 2) + "┐";
+  // ── Top border ──
+  const leftW = Math.floor(W * 0.35);
+  const rightW = W - leftW - 1;
+  o += ERASE_LINE + `${DIM}${"─".repeat(leftW)}┬${"─".repeat(rightW)}${RST}\n`;
 
-  // Agents panel (left half)
-  const agentsPanelStart = 3;
-  const agentsPanelHeight = height - 5; // Leave room for status bar
-  const agentsPanelWidth = Math.floor(width / 2) - 1;
+  // ── Panel headers ──
+  const agentHeader = state.focusedPanel === 0
+    ? `${INV}${YEL} Agents (${state.agents.length}) ${RST}`
+    : `${YEL}${BLD} Agents (${state.agents.length}) ${RST}`;
+  const msgHeader = state.focusedPanel === 1
+    ? `${INV}${YEL} Messages (${state.totalMessages}) ${RST}`
+    : `${YEL}${BLD} Messages (${state.totalMessages}) ${RST}`;
 
-  output += moveCursor(agentsPanelStart, 1);
-  output += `│ ${YELLOW}Agents${RESET} ${state.focusedPanel === "agents" ? "◀" : " "}`;
-  output += " ".repeat(agentsPanelWidth - 10) + "│";
+  o += ERASE_LINE + pad(agentHeader, leftW) + `${DIM}│${RST}` + pad(msgHeader, rightW) + "\n";
+  o += ERASE_LINE + `${DIM}${"─".repeat(leftW)}┼${"─".repeat(rightW)}${RST}\n`;
 
-  for (let i = 0; i < agentsPanelHeight - 1; i++) {
-    const agent = state.agents[i];
-    output += moveCursor(agentsPanelStart + 1 + i, 1);
-    output += "│ ";
+  // ── Content area ──
+  const contentH = H - 7; // header + borders + status
 
-    if (agent) {
-      const online = isOnline(agent.last_seen);
-      const statusColor = online ? GREEN : RED;
-      const statusText = online ? "●" : "○";
-      const name = truncate(agent.name, 15);
-      const type = truncate(agent.type, 8);
-      const host = truncate(agent.host, 10);
-      const lastSeen = formatTimestamp(agent.last_seen);
-
-      output += `${statusColor}${statusText}${RESET} ${name.padEnd(15)} ${DIM}${type}${RESET}`;
-    } else {
-      output += " ".repeat(agentsPanelWidth - 2);
+  for (let i = 0; i < contentH; i++) {
+    // Left: agents
+    let left = "";
+    if (i < state.agents.length) {
+      const a = state.agents[i];
+      const on = isOnline(a.last_seen);
+      const dot = on ? `${GRN}●${RST}` : `${RED}○${RST}`;
+      const name = trunc(a.name, 14);
+      const type = `${DIM}${trunc(a.type, 8)}${RST}`;
+      const ago = `${DIM}${timeAgo(a.last_seen)}${RST}`;
+      left = ` ${dot} ${name.padEnd(14)} ${type} ${ago}`;
     }
 
-    output += " ".repeat(Math.max(0, agentsPanelWidth - 2 - (agent ? 26 : 0))) + "│";
-  }
-
-  // Middle divider
-  for (let i = borderLine; i < height - 2; i++) {
-    output += moveCursor(i, agentsPanelWidth + 2);
-    output += "│";
-  }
-
-  // Messages panel (right half)
-  const messagesPanelStart = 3;
-  const messagesPanelWidth = width - agentsPanelWidth - 3;
-
-  output += moveCursor(messagesPanelStart, agentsPanelWidth + 3);
-  output += `${YELLOW}Messages${RESET} ${state.focusedPanel === "messages" ? "◀" : " "}`;
-
-  for (let i = 0; i < agentsPanelHeight - 1; i++) {
-    const msg = state.messages[i];
-    output += moveCursor(messagesPanelStart + 1 + i, agentsPanelWidth + 3);
-
-    if (msg) {
-      const from = truncate(msg.from_agent, 10);
-      const to = truncate(msg.to_agent, 10);
-      const body = truncate(msg.body, messagesPanelWidth - 30);
-      const timestamp = formatTimestamp(msg.created_at);
-
-      output += `${from}→${to} ${body} ${DIM}${timestamp}${RESET}`;
-    } else {
-      output += " ".repeat(messagesPanelWidth - 1);
+    // Right: messages
+    let right = "";
+    if (i < state.messages.length) {
+      const m = state.messages[i];
+      const dir = m.from_agent === config.agent ? `${CYN}→${RST}` : `${GRN}←${RST}`;
+      const other = m.from_agent === config.agent ? m.to_agent : m.from_agent;
+      const name = trunc(other, 12);
+      const body = trunc(m.body.replace(/\n/g, " "), rightW - 22);
+      const ago = `${DIM}${timeAgo(m.created_at)}${RST}`;
+      right = ` ${dir} ${name.padEnd(12)} ${body} ${ago}`;
     }
+
+    o += ERASE_LINE + pad(left, leftW) + `${DIM}│${RST}` + pad(right, rightW) + "\n";
   }
 
-  // Bottom border
-  const bottomBorderLine = height - 2;
-  output += moveCursor(bottomBorderLine, 1);
-  output += "├" + "─".repeat(agentsPanelWidth) + "┼" + "─".repeat(width - agentsPanelWidth - 3) + "┤";
+  // ── Rooms row (if any) ──
+  o += ERASE_LINE + `${DIM}${"─".repeat(leftW)}┴${"─".repeat(rightW)}${RST}\n`;
 
-  // Status bar
-  const statusBarLine = height - 1;
-  output += moveCursor(statusBarLine, 1);
-  const statusBar = `│ Agents: ${state.agents.length} │ Messages: ${state.totalMessages} │ Unread: ${state.unreadCount} │ Refresh: 3s │ q:quit r:refresh tab:focus`;
-  output += statusBar + " ".repeat(Math.max(0, width - statusBar.length - 1)) + "│";
+  if (state.rooms.length > 0) {
+    const roomList = state.rooms.map(r => `${CYN}#${r.name}${RST}${DIM}(${r.members.length})${RST}`).join("  ");
+    o += ERASE_LINE + ` ${YEL}Rooms:${RST} ${roomList}\n`;
+  } else {
+    o += ERASE_LINE + "\n";
+  }
 
-  // Bottom border close
-  output += moveCursor(height, 1);
-  output += "└" + "─".repeat(width - 2) + "┘";
+  // ── Status bar ──
+  const unreadBadge = state.unreadCount > 0 ? `${RED}${BLD}${state.unreadCount} unread${RST}` : `${DIM}0 unread${RST}`;
+  const refreshTime = state.lastRefresh ? `${DIM}${state.lastRefresh.toLocaleTimeString()}${RST}` : "";
+  const statusLeft = ` ${state.agents.length} agents  ${state.totalMessages} msgs  ${unreadBadge}  ${refreshTime}`;
+  const statusRight = `${DIM}q${RST}:quit  ${DIM}r${RST}:refresh  ${DIM}tab${RST}:focus `;
+  const statusGap = Math.max(0, W - statusLeft.replace(/\x1b\[[0-9;]*m/g, "").length - statusRight.replace(/\x1b\[[0-9;]*m/g, "").length);
+  o += ERASE_LINE + `${INV}${statusLeft}${" ".repeat(statusGap)}${statusRight}${RST}`;
 
-  // Error display
+  // ── Error overlay ──
   if (state.error) {
-    const errorLine = height - 3;
-    output += moveCursor(errorLine, 3);
-    output += `${RED}Error: ${truncate(state.error, width - 10)}${RESET}`;
+    o += mv(H - 2, 2) + ERASE_LINE + `${RED}${BLD}Error: ${state.error}${RST}`;
   }
 
-  process.stdout.write(output);
+  process.stdout.write(o);
 }
 
 async function main() {
   const config = loadConfig();
-  if (!config) {
-    console.error("❌ Not configured. Run: meshterm init");
-    process.exit(1);
-  }
+  if (!config) { console.error("❌ Not configured. Run: meshterm init"); process.exit(1); }
 
   const state: State = {
-    agents: [],
-    messages: [],
-    connected: false,
-    error: null,
-    totalMessages: 0,
-    unreadCount: 0,
-    focusedPanel: "agents",
+    agents: [], messages: [], rooms: [],
+    connected: false, error: null,
+    totalMessages: 0, unreadCount: 0,
+    focusedPanel: 0, lastRefresh: new Date(),
   };
 
-  // Enable raw mode for keyboard input
-  if (process.stdin.isTTY) {
-    process.stdin.setRawMode(true);
-  }
+  // Alternate screen + raw mode
+  process.stdout.write(ALT_ON + HIDE);
+  if (process.stdin.isTTY) process.stdin.setRawMode(true);
   process.stdin.resume();
   process.stdin.setEncoding("utf8");
 
-  // Keyboard handler
+  const cleanup = () => {
+    process.stdout.write(SHOW + ALT_OFF);
+    if (process.stdin.isTTY) process.stdin.setRawMode(false);
+  };
+
   process.stdin.on("data", (key: string) => {
-    if (key === "q" || key === "\u0003") {
-      // q or Ctrl+C
-      cleanup();
-      process.exit(0);
-    } else if (key === "r") {
-      // Force refresh
-      fetchData(config, state).then(() => render(config, state));
-    } else if (key === "\t") {
-      // Tab to switch focus
-      state.focusedPanel = state.focusedPanel === "agents" ? "messages" : "agents";
-      render(config, state);
-    }
+    if (key === "q" || key === "\u0003") { cleanup(); process.exit(0); }
+    if (key === "r") fetchData(config, state).then(() => render(config, state));
+    if (key === "\t") { state.focusedPanel = (state.focusedPanel + 1) % 2; render(config, state); }
   });
 
-  // Cleanup on exit
-  function cleanup() {
-    process.stdout.write(SHOW_CURSOR + CLEAR + moveCursor(1, 1));
-    if (process.stdin.isTTY) {
-      process.stdin.setRawMode(false);
-    }
-  }
+  process.on("SIGINT", () => { cleanup(); process.exit(0); });
+  process.on("exit", cleanup);
+  process.stdout.on("resize", () => render(config, state));
 
-  process.on("SIGINT", () => {
-    cleanup();
-    process.exit(0);
-  });
-
-  // Initial fetch and render
   await fetchData(config, state);
   render(config, state);
-
-  // Auto-refresh every 3 seconds
-  setInterval(async () => {
-    await fetchData(config, state);
-    render(config, state);
-  }, 3000);
+  setInterval(async () => { await fetchData(config, state); render(config, state); }, 3000);
 }
 
 main();
