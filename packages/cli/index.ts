@@ -235,6 +235,149 @@ switch (command) {
     break;
   }
 
+  case "room": {
+    const [subcommand, ...roomRest] = rest;
+    const config = loadConfig();
+    if (!config) {
+      console.error("❌ Not configured. Run: meshterm init");
+      process.exit(1);
+    }
+
+    if (subcommand === "create") {
+      const [name] = roomRest;
+      if (!name || !args.members || !args.mode) {
+        console.error("Usage: meshterm room create <name> --members a,b,c --mode free-form|round-robin|reactive|moderated [--moderator agent]");
+        process.exit(1);
+      }
+
+      const memberList = args.members.split(",").map(s => s.trim());
+      const mode = args.mode;
+
+      if (!["free-form", "round-robin", "reactive", "moderated"].includes(mode)) {
+        console.error("❌ Mode must be free-form, round-robin, reactive, or moderated");
+        process.exit(1);
+      }
+
+      if (mode === "moderated" && !args.moderator) {
+        console.error("❌ Moderator required for moderated mode");
+        process.exit(1);
+      }
+
+      const payload: any = {
+        name,
+        members: memberList,
+        mode,
+      };
+
+      if (args.moderator) {
+        payload.moderator = args.moderator;
+      }
+
+      const result = await meshFetch("/rooms", config, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
+      console.log(`✅ Room '${name}' created`);
+      console.log(JSON.stringify(result.room, null, 2));
+    } else if (subcommand === "list") {
+      const rooms = await meshFetch("/rooms", config);
+      if (!rooms.length) {
+        console.log("No rooms available");
+      } else {
+        console.log(`🚪 ${rooms.length} room(s):\n`);
+        for (const r of rooms) {
+          console.log(`  ${r.name} (${r.mode})`);
+          console.log(`    Members: ${r.members.join(", ")}`);
+          if (r.moderator) {
+            console.log(`    Moderator: ${r.moderator}`);
+          }
+          console.log(`    Created: ${r.created_at}`);
+          console.log(`    Last activity: ${r.last_activity}`);
+        }
+      }
+    } else if (subcommand === "send") {
+      const [name, ...bodyParts] = roomRest;
+      const body = bodyParts.join(" ");
+      if (!name || !body) {
+        console.error("Usage: meshterm room send <name> <message>");
+        process.exit(1);
+      }
+
+      const result = await meshFetch(`/rooms/${encodeURIComponent(name)}/messages`, config, {
+        method: "POST",
+        body: JSON.stringify({
+          from_agent: config.agent,
+          body,
+        }),
+      });
+
+      console.log(`✅ Message sent to room '${name}'`);
+      console.log(JSON.stringify(result.message, null, 2));
+    } else if (subcommand === "history") {
+      const [name] = roomRest;
+      if (!name) {
+        console.error("Usage: meshterm room history <name> [--limit 50]");
+        process.exit(1);
+      }
+
+      const limit = args.limit ?? "50";
+      const msgs = await meshFetch(`/rooms/${encodeURIComponent(name)}/messages?limit=${limit}`, config);
+      
+      if (!msgs.length) {
+        console.log(`📭 No messages in room '${name}'`);
+      } else {
+        console.log(`💬 ${msgs.length} message(s) in '${name}':\n`);
+        for (const m of msgs) {
+          console.log(`[${m.created_at}] ${m.from_agent}: ${m.body}`);
+        }
+      }
+    } else if (subcommand === "join") {
+      const [name] = roomRest;
+      if (!name) {
+        console.error("Usage: meshterm room join <name>");
+        process.exit(1);
+      }
+
+      const result = await meshFetch(`/rooms/${encodeURIComponent(name)}/join`, config, {
+        method: "POST",
+        body: JSON.stringify({ agent: config.agent }),
+      });
+
+      console.log(`✅ Joined room '${name}'`);
+      console.log(JSON.stringify(result.room, null, 2));
+    } else if (subcommand === "leave") {
+      const [name] = roomRest;
+      if (!name) {
+        console.error("Usage: meshterm room leave <name>");
+        process.exit(1);
+      }
+
+      const result = await meshFetch(`/rooms/${encodeURIComponent(name)}/leave`, config, {
+        method: "POST",
+        body: JSON.stringify({ agent: config.agent }),
+      });
+
+      console.log(`✅ Left room '${name}'`);
+      console.log(JSON.stringify(result.room, null, 2));
+    } else if (subcommand === "close") {
+      const [name] = roomRest;
+      if (!name) {
+        console.error("Usage: meshterm room close <name>");
+        process.exit(1);
+      }
+
+      await meshFetch(`/rooms/${encodeURIComponent(name)}`, config, {
+        method: "DELETE",
+      });
+
+      console.log(`✅ Room '${name}' closed`);
+    } else {
+      console.log("Usage: meshterm room <create|list|send|history|join|leave|close>");
+    }
+    break;
+  }
+
   case "status": {
     const config = loadConfig();
     if (!config) {
@@ -372,6 +515,15 @@ Commands:
     [--priority a,b,c]                    Agent priority order (default: same as agents)
     [--fallback queue|reject]             Fallback when no agents online (default: queue)
     [--capabilities x,y,z]                Role capabilities (optional)
+  room create <name> --members a,b,c      Create a new room
+    --mode <mode>                         Room mode: free-form, round-robin, reactive, moderated
+    [--moderator <agent>]                 Moderator (required for moderated mode)
+  room list                               List all rooms
+  room send <name> <message>              Send message to room
+  room history <name> [--limit 50]        View room message history
+  room join <name>                        Join a room
+  room leave <name>                       Leave a room
+  room close <name>                       Close/delete a room
   status                                  Show mesh status (agents, messages, health)
   tui                                     Launch terminal dashboard
   mcp                                     Start MCP server (stdio transport for AI assistants)
@@ -384,6 +536,9 @@ Examples:
   meshterm send role:coder "review auth module"
   meshterm send role:coder --broadcast "system update in 5 min"
   meshterm role create coder --agents kiro-mac,kiro-vps --priority kiro-vps,kiro-mac --fallback queue
+  meshterm room create planning --members kaze,kiro-vps,kiro-mac --mode free-form
+  meshterm room send planning "Let's discuss the auth refactor"
+  meshterm room history planning
   meshterm roles
   meshterm poll
   meshterm tui

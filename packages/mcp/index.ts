@@ -132,6 +132,14 @@ const TOOLS = [
       properties: {},
     },
   },
+  {
+    name: "mesh_roles",
+    description: "List all available roles on the mesh",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
 ];
 
 // Tool handlers
@@ -139,19 +147,33 @@ async function handleToolCall(name: string, args: any, config: Config): Promise<
   switch (name) {
     case "mesh_send":
     case "mesh_reply": {
-      const { to, message } = args;
+      const { to, message, broadcast } = args;
       if (!to || !message) {
         throw new Error("Missing required parameters: to, message");
       }
+      
+      const payload: any = {
+        from_agent: config.agent,
+        to_agent: to,
+        body: message,
+      };
+      
+      if (broadcast) {
+        payload.broadcast = true;
+      }
+      
       const result = await meshFetch("/messages", config, {
         method: "POST",
-        body: JSON.stringify({
-          from_agent: config.agent,
-          to_agent: to,
-          body: message,
-        }),
+        body: JSON.stringify(payload),
       });
-      return `✅ Message sent to ${to}\nMessage ID: ${result.id}`;
+      
+      if (result.broadcast) {
+        return `✅ Broadcast to ${result.count} agents in ${to}`;
+      } else if (result.resolved_to) {
+        return `✅ Message sent to ${to} → resolved to ${result.resolved_to}\nMessage ID: ${result.message.id}`;
+      } else {
+        return `✅ Message sent to ${to}\nMessage ID: ${result.message?.id ?? result.id}`;
+      }
     }
 
     case "mesh_poll": {
@@ -198,6 +220,19 @@ Health: ${health.ok ? "✅ OK" : "❌ DOWN"}
 Total agents: ${agents.length}
 Total messages: ${health.messages ?? 0}
 Unread for you: ${msgs.length}`;
+    }
+
+    case "mesh_roles": {
+      const roles = await meshFetch("/roles", config);
+      if (!roles.length) {
+        return "No roles defined on the mesh";
+      }
+      
+      const formatted = roles.map((r: any) => 
+        `🎭 ${r.name}\n   Agents: ${r.agents.join(", ")}\n   Priority: ${r.priority.join(", ")}\n   Fallback: ${r.fallback}${r.capabilities.length > 0 ? `\n   Capabilities: ${r.capabilities.join(", ")}` : ""}`
+      ).join("\n\n");
+      
+      return `${roles.length} role(s) available:\n\n${formatted}`;
     }
 
     default:

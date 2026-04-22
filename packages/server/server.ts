@@ -38,11 +38,30 @@ interface Role {
   fallback: "queue" | "reject";
 }
 
+interface Room {
+  name: string;
+  members: string[];
+  mode: "free-form" | "round-robin" | "reactive" | "moderated";
+  moderator?: string;
+  created_at: string;
+  last_activity: string;
+}
+
+interface RoomMessage {
+  id: string;
+  room: string;
+  from_agent: string;
+  body: string;
+  created_at: string;
+}
+
 // --- State ---
 
 let messages: Message[] = [];
 let agents: Map<string, Agent> = new Map();
 let roles: Map<string, Role> = new Map();
+let rooms: Map<string, Room> = new Map();
+let roomMessages: RoomMessage[] = [];
 
 // Load from disk
 if (existsSync(STORE_PATH)) {
@@ -51,7 +70,9 @@ if (existsSync(STORE_PATH)) {
     messages = data.messages ?? [];
     for (const a of data.agents ?? []) agents.set(a.name, a);
     for (const r of data.roles ?? []) roles.set(r.name, r);
-    console.log(`Loaded ${messages.length} messages, ${agents.size} agents, ${roles.size} roles`);
+    for (const room of data.rooms ?? []) rooms.set(room.name, room);
+    roomMessages = data.roomMessages ?? [];
+    console.log(`Loaded ${messages.length} messages, ${agents.size} agents, ${roles.size} roles, ${rooms.size} rooms, ${roomMessages.length} room messages`);
   } catch {
     console.log("Fresh start — no valid store found");
   }
@@ -64,7 +85,9 @@ function persist() {
       { 
         messages: messages.slice(-MAX_MESSAGES), 
         agents: [...agents.values()],
-        roles: [...roles.values()]
+        roles: [...roles.values()],
+        rooms: [...rooms.values()],
+        roomMessages: roomMessages.slice(-MAX_MESSAGES)
       },
       null,
       2
@@ -315,9 +338,22 @@ Bun.serve({
       const agent = decodeURIComponent(msgMatch[1]);
       const unreadOnly = url.searchParams.get("unread") === "true";
       const limit = Number(url.searchParams.get("limit") ?? 50);
+      
       // Update last_seen
       const a = agents.get(agent);
       if (a) a.last_seen = new Date().toISOString();
+
+      // Check for queued role messages that can now be delivered
+      const queuedMessages = messages.filter(m => m.to_agent.startsWith("role:") && !m.read);
+      for (const msg of queuedMessages) {
+        const roleName = msg.to_agent.slice(5);
+        const resolution = resolveRole(roleName);
+        
+        // If this agent is now the resolved target, update the message
+        if ("agent" in resolution && resolution.agent === agent && resolution.resolved_to) {
+          msg.to_agent = agent;
+        }
+      }
 
       let result = messages.filter((m) => m.to_agent === agent);
       if (unreadOnly) result = result.filter((m) => !m.read);
@@ -342,6 +378,158 @@ Bun.serve({
       const limit = Number(url.searchParams.get("limit") ?? 50);
       const result = messages
         .filter((m) => m.from_agent === agent || m.to_agent === agent)
+        .slice(-limit);
+      return json(result);
+    }
+
+    // --- Rooms ---
+
+    // POST /rooms { name, members, mode, moderator? }
+    if (method === "POST" && path === "/rooms") {
+      const body = await req.json();
+      if (!body.name || !body.members || !body.mode) {
+        return json({ error: "missing name, members, or mode" }, 400);
+      }
+      if (!["free-form", "round-robin", "reactive", "moderated"].includes(body.mode)) {
+        return json({ error: "mode must be free-form, round-robin, reactive, or moderated" }, 400);
+      }
+      if (body.mode === "moderated" && !body.moderator) {
+        return json({ error: "moderator required for moderated mode" }, 400);
+      }
+      if (rooms.has(body.name)) {
+        return json({ error: "room already exists" }, 400);
+      }
+
+      const room: Room = {
+        name: body.name,
+        members: body.members,
+        mode: body.mode,
+        moderator: body.moderator,
+        created_at: new Date().toISOString(),
+        last_activity: new Date().toISOString(),
+      };
+      rooms.set(room.name, room);
+      persist();
+      return json({ ok: true, room });
+    }
+
+    // GET /rooms
+    if (method === "GET" && path === "/rooms") {
+      return json([...rooms.values()]);
+    }
+
+    // GET /rooms/:name
+    const roomGetMatch = path.match(/^\/rooms\/([^/]+)$/);
+    if (method === "GET" && roomGetMatch) {
+      const name = decodeURIComponent(roomGetMatch[1]);
+      const room = rooms.get(name);
+      if (!room) return json({ error: "room not found" }, 404);
+      return json(room);
+    }
+
+    // DELETE /rooms/:name
+    const roomDeleteMatch = path.match(/^\/rooms\/([^/]+)$/);
+    if (method === "DELETE" && roomDeleteMatch) {
+      const name = decodeURIComponent(roomDeleteMatch[1]);
+      if (!rooms.has(name)) {
+        return json({ error: "room not found" }, 404);
+      }
+      rooms.delete(name);
+      // Remove room messages
+      roomMessages = roomMessages.filter(m => m.room !== name);
+      persist();
+      return json({ ok: true });
+    }
+
+    // POST /rooms/:name/join { agent }
+    const roomJoinMatch = path.match(/^\/rooms\/([^/]+)\/join$/);
+    if (method === "POST" && roomJoinMatch) {
+      const name = decodeURIComponent(roomJoinMatch[1]);
+      const room = rooms.get(name);
+      if (!room) return json({ error: "room not found" }, 404);
+      
+      const body = await req.json();
+      if (!body.agent) {
+        return json({ error: "missing agent" }, 400);
+      }
+      
+      if (room.members.includes(body.agent)) {
+        return json({ error: "agent already in room" }, 400);
+      }
+      
+      room.members.push(body.agent);
+      room.last_activity = new Date().toISOString();
+      persist();
+      return json({ ok: true, room });
+    }
+
+    // POST /rooms/:name/leave { agent }
+    const roomLeaveMatch = path.match(/^\/rooms\/([^/]+)\/leave$/);
+    if (method === "POST" && roomLeaveMatch) {
+      const name = decodeURIComponent(roomLeaveMatch[1]);
+      const room = rooms.get(name);
+      if (!room) return json({ error: "room not found" }, 404);
+      
+      const body = await req.json();
+      if (!body.agent) {
+        return json({ error: "missing agent" }, 400);
+      }
+      
+      if (!room.members.includes(body.agent)) {
+        return json({ error: "agent not in room" }, 400);
+      }
+      
+      room.members = room.members.filter(a => a !== body.agent);
+      room.last_activity = new Date().toISOString();
+      persist();
+      return json({ ok: true, room });
+    }
+
+    // POST /rooms/:name/messages { from_agent, body }
+    const roomMsgMatch = path.match(/^\/rooms\/([^/]+)\/messages$/);
+    if (method === "POST" && roomMsgMatch) {
+      const name = decodeURIComponent(roomMsgMatch[1]);
+      const room = rooms.get(name);
+      if (!room) return json({ error: "room not found" }, 404);
+      
+      const body = await req.json();
+      if (!body.from_agent || !body.body) {
+        return json({ error: "missing from_agent or body" }, 400);
+      }
+      
+      if (!room.members.includes(body.from_agent)) {
+        return json({ error: "agent not a member of this room" }, 400);
+      }
+      
+      const msg: RoomMessage = {
+        id: genId(),
+        room: name,
+        from_agent: body.from_agent,
+        body: body.body,
+        created_at: new Date().toISOString(),
+      };
+      roomMessages.push(msg);
+      
+      // Trim old room messages
+      if (roomMessages.length > MAX_MESSAGES * 1.5) {
+        roomMessages = roomMessages.slice(-MAX_MESSAGES);
+      }
+      
+      room.last_activity = new Date().toISOString();
+      persist();
+      return json({ ok: true, message: msg });
+    }
+
+    // GET /rooms/:name/messages?limit=50
+    const roomMsgGetMatch = path.match(/^\/rooms\/([^/]+)\/messages$/);
+    if (method === "GET" && roomMsgGetMatch) {
+      const name = decodeURIComponent(roomMsgGetMatch[1]);
+      const room = rooms.get(name);
+      if (!room) return json({ error: "room not found" }, 404);
+      
+      const limit = Number(url.searchParams.get("limit") ?? 50);
+      const result = roomMessages
+        .filter(m => m.room === name)
         .slice(-limit);
       return json(result);
     }
