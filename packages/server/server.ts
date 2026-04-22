@@ -510,6 +510,20 @@ Bun.serve({
       };
       roomMessages.push(msg);
       
+      // Also create direct messages to each member so daemons pick them up
+      for (const member of room.members) {
+        if (member === body.from_agent) continue; // skip sender
+        const directMsg: Message = {
+          id: genId(),
+          from_agent: body.from_agent,
+          to_agent: member,
+          body: `[room:${name}] ${body.body}`,
+          created_at: new Date().toISOString(),
+          read: false,
+        };
+        messages.push(directMsg);
+      }
+      
       // Trim old room messages
       if (roomMessages.length > MAX_MESSAGES * 1.5) {
         roomMessages = roomMessages.slice(-MAX_MESSAGES);
