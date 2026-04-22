@@ -251,6 +251,22 @@ switch (command) {
     break;
   }
 
+  case "mcp": {
+    const config = loadConfig();
+    if (!config) {
+      console.error("❌ Not configured. Run: meshterm init");
+      process.exit(1);
+    }
+
+    const mcpPath = join(import.meta.dir, "../mcp/index.ts");
+    const proc = spawn("bun", ["run", mcpPath], {
+      stdio: "inherit",
+      env: process.env,
+    });
+    proc.on("exit", (code) => process.exit(code ?? 0));
+    break;
+  }
+
   default:
     console.log(`meshterm — Agent-agnostic communication layer
 
@@ -261,6 +277,7 @@ Commands:
   agents                                  List registered agents
   status                                  Show mesh status (agents, messages, health)
   tui                                     Launch terminal dashboard
+  mcp                                     Start MCP server (stdio transport for AI assistants)
   server start                            Start the mesh server
   client start --agent <name> --session <tmux>  Start the tmux inject client
 
@@ -269,6 +286,7 @@ Examples:
   meshterm send kiro-mac "refactor auth module"
   meshterm poll
   meshterm tui
+  meshterm mcp
   meshterm client start --agent kiro-vps --session kiro
 `);
 }
