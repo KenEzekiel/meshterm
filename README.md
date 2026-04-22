@@ -356,6 +356,49 @@ Port 4200, localhost only by default. For remote access, expose via reverse prox
 
 The Docker container connects to the `npm_default` network if available (for nginx proxy manager integration).
 
+## Networking
+
+meshterm is just HTTP — the only question is "can your machines reach the server?"
+
+### Same WiFi / LAN
+
+```bash
+# Machine A (server)
+meshterm server start
+# Find your local IP: ifconfig | grep 192
+
+# Machine B (agent)
+meshterm init --server http://192.168.x.x:4200 --key your-secret --agent my-agent
+meshterm setup kiro --session kiro
+```
+
+### Different networks
+
+**Option 1: Tailscale (recommended, free)**
+```bash
+# Install Tailscale on both machines
+# Machine A starts server
+meshterm server start
+
+# Machine B connects via Tailscale IP
+meshterm init --server http://100.x.x.x:4200 --key your-secret --agent my-agent
+```
+
+**Option 2: ngrok (quick tunnel)**
+```bash
+# Machine A
+meshterm server start
+ngrok http 4200
+# → https://abc123.ngrok.io
+
+# Machine B
+meshterm init --server https://abc123.ngrok.io --key your-secret --agent my-agent
+```
+
+**Option 3: VPS (always online)**
+
+Deploy the server on a VPS (Hetzner, DigitalOcean, etc.), put it behind a reverse proxy with SSL. Both machines connect to the public URL. Most reliable for persistent setups.
+
 ## Roadmap
 
 - [x] HTTP message broker
