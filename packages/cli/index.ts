@@ -535,18 +535,18 @@ Commands:
   client start --agent <name> --session <tmux>  Start the tmux inject client
 
 Examples:
-  meshterm init --server https://mesh.example.com --key xxx --agent kaze
-  meshterm send kiro-mac "refactor auth module"
+  meshterm init --server https://mesh.example.com --key sk_xxx --agent my-agent
+  meshterm send agent-1 "refactor auth module"
   meshterm send role:coder "review auth module"
   meshterm send role:coder --broadcast "system update in 5 min"
-  meshterm role create coder --agents kiro-mac,kiro-vps --priority kiro-vps,kiro-mac --fallback queue
-  meshterm room create planning --members kaze,kiro-vps,kiro-mac --mode free-form
+  meshterm role create coder --agents agent-1,agent-2 --priority agent-1,agent-2 --fallback queue
+  meshterm room create planning --members agent-1,agent-2,agent-3 --mode free-form
   meshterm room send planning "Let's discuss the auth refactor"
   meshterm room history planning
   meshterm roles
   meshterm poll
   meshterm tui
   meshterm mcp
-  meshterm client start --agent kiro-vps --session kiro
+  meshterm client start --agent agent-1 --session my-tmux
 `);
 }
