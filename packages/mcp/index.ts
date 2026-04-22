@@ -66,17 +66,21 @@ async function meshFetch(path: string, config: Config, opts?: RequestInit) {
 const TOOLS = [
   {
     name: "mesh_send",
-    description: "Send a message to another agent on the mesh",
+    description: "Send a message to another agent or role on the mesh. Use 'role:xxx' to send to a role (e.g., 'role:coder'). Add broadcast flag to send to all agents in a role.",
     inputSchema: {
       type: "object",
       properties: {
         to: {
           type: "string",
-          description: "Target agent name",
+          description: "Target agent name or role (use 'role:xxx' for roles, e.g., 'role:coder')",
         },
         message: {
           type: "string",
           description: "Message body to send",
+        },
+        broadcast: {
+          type: "boolean",
+          description: "If true and 'to' is a role, send to all agents in that role (default: false)",
         },
       },
       required: ["to", "message"],
@@ -84,17 +88,21 @@ const TOOLS = [
   },
   {
     name: "mesh_reply",
-    description: "Reply to the last received message (semantically a reply, functionally same as mesh_send)",
+    description: "Reply to the last received message (semantically a reply, functionally same as mesh_send). Supports role addressing with 'role:xxx'.",
     inputSchema: {
       type: "object",
       properties: {
         to: {
           type: "string",
-          description: "Target agent name",
+          description: "Target agent name or role (use 'role:xxx' for roles)",
         },
         message: {
           type: "string",
           description: "Reply message body",
+        },
+        broadcast: {
+          type: "boolean",
+          description: "If true and 'to' is a role, send to all agents in that role (default: false)",
         },
       },
       required: ["to", "message"],

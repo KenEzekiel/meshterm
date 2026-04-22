@@ -55,6 +55,11 @@ const { values: args, positionals } = parseArgs({
     poll: { type: "string", default: "5000" },
     type: { type: "string", default: "unknown" },
     host: { type: "string", default: "unknown" },
+    broadcast: { type: "boolean", default: false },
+    agents: { type: "string" },
+    priority: { type: "string" },
+    fallback: { type: "string", default: "queue" },
+    capabilities: { type: "string" },
   },
   allowPositionals: true,
 });
@@ -91,8 +96,18 @@ switch (command) {
     const [to, ...bodyParts] = rest;
     const body = bodyParts.join(" ");
     if (!to || !body) {
-      console.error("Usage: meshterm send <to_agent> <message>");
+      console.error("Usage: meshterm send <to_agent> <message> [--broadcast]");
       process.exit(1);
+    }
+
+    const payload: any = { 
+      from_agent: config.agent, 
+      to_agent: to, 
+      body 
+    };
+    
+    if (args.broadcast) {
+      payload.broadcast = true;
     }
 
     const result = await meshFetch(
@@ -100,10 +115,17 @@ switch (command) {
       config,
       {
         method: "POST",
-        body: JSON.stringify({ from_agent: config.agent, to_agent: to, body }),
+        body: JSON.stringify(payload),
       }
     );
-    console.log(`✅ Sent to ${to}`);
+    
+    if (result.broadcast) {
+      console.log(`✅ Broadcast to ${result.count} agents in ${to}`);
+    } else if (result.resolved_to) {
+      console.log(`✅ Sent to ${to} → resolved to ${result.resolved_to}`);
+    } else {
+      console.log(`✅ Sent to ${to}`);
+    }
     console.log(JSON.stringify(result, null, 2));
     break;
   }
@@ -139,6 +161,76 @@ switch (command) {
     console.log(`🤖 ${agents.length} registered agents:\n`);
     for (const a of agents) {
       console.log(`  ${a.name} (${a.type}@${a.host}) — last seen ${a.last_seen}`);
+    }
+    break;
+  }
+
+  case "roles": {
+    const config = loadConfig();
+    if (!config) {
+      console.error("❌ Not configured. Run: meshterm init");
+      process.exit(1);
+    }
+
+    const roles = await meshFetch("/roles", config);
+    if (!roles.length) {
+      console.log("No roles defined");
+    } else {
+      console.log(`🎭 ${roles.length} role(s):\n`);
+      for (const r of roles) {
+        console.log(`  ${r.name}`);
+        console.log(`    Agents: ${r.agents.join(", ")}`);
+        console.log(`    Priority: ${r.priority.join(", ")}`);
+        console.log(`    Fallback: ${r.fallback}`);
+        if (r.capabilities.length > 0) {
+          console.log(`    Capabilities: ${r.capabilities.join(", ")}`);
+        }
+      }
+    }
+    break;
+  }
+
+  case "role": {
+    const [subcommand, ...roleRest] = rest;
+    
+    if (subcommand === "create") {
+      const config = loadConfig();
+      if (!config) {
+        console.error("❌ Not configured. Run: meshterm init");
+        process.exit(1);
+      }
+
+      const [name] = roleRest;
+      if (!name || !args.agents) {
+        console.error("Usage: meshterm role create <name> --agents a,b,c [--priority a,b,c] [--fallback queue|reject] [--capabilities x,y,z]");
+        process.exit(1);
+      }
+
+      const agentList = args.agents.split(",").map(s => s.trim());
+      const priorityList = args.priority ? args.priority.split(",").map(s => s.trim()) : agentList;
+      const capabilitiesList = args.capabilities ? args.capabilities.split(",").map(s => s.trim()) : [];
+      const fallback = args.fallback ?? "queue";
+
+      if (!["queue", "reject"].includes(fallback)) {
+        console.error("❌ Fallback must be 'queue' or 'reject'");
+        process.exit(1);
+      }
+
+      const result = await meshFetch("/roles", config, {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          agents: agentList,
+          priority: priorityList,
+          fallback,
+          capabilities: capabilitiesList,
+        }),
+      });
+
+      console.log(`✅ Role '${name}' created`);
+      console.log(JSON.stringify(result.role, null, 2));
+    } else {
+      console.log("Usage: meshterm role create <name> --agents a,b,c [--priority a,b,c] [--fallback queue|reject] [--capabilities x,y,z]");
     }
     break;
   }
@@ -272,9 +364,14 @@ switch (command) {
 
 Commands:
   init                                    Configure meshterm (server URL, API key, agent name)
-  send <to> <message>                     Send a message to another agent
+  send <to> <message> [--broadcast]       Send a message to another agent or role
   poll                                    Check for unread messages
   agents                                  List registered agents
+  roles                                   List all roles
+  role create <name> --agents a,b,c       Create a new role
+    [--priority a,b,c]                    Agent priority order (default: same as agents)
+    [--fallback queue|reject]             Fallback when no agents online (default: queue)
+    [--capabilities x,y,z]                Role capabilities (optional)
   status                                  Show mesh status (agents, messages, health)
   tui                                     Launch terminal dashboard
   mcp                                     Start MCP server (stdio transport for AI assistants)
@@ -284,6 +381,10 @@ Commands:
 Examples:
   meshterm init --server https://mesh.example.com --key xxx --agent kaze
   meshterm send kiro-mac "refactor auth module"
+  meshterm send role:coder "review auth module"
+  meshterm send role:coder --broadcast "system update in 5 min"
+  meshterm role create coder --agents kiro-mac,kiro-vps --priority kiro-vps,kiro-mac --fallback queue
+  meshterm roles
   meshterm poll
   meshterm tui
   meshterm mcp
