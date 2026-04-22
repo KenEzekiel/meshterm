@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 /**
- * Mesh Client v3 — Dumb pipe with retry.
+ * Mesh Client v3.1 — Dumb pipe with retry on failure.
  * Polls mesh for unread messages, injects into tmux.
- * Does NOT mark messages as read — agent does that via MCP mesh_poll/mesh_reply.
- * Re-injects if message stays unread (up to MAX_ATTEMPTS, 30s apart).
+ * Marks as read after successful first inject.
+ * Retries only if tmux inject FAILS (not if agent is busy).
  */
 
 import { parseArgs } from "util";
@@ -25,16 +25,16 @@ const SECRET = args.secret!;
 const AGENT = args.agent!;
 const SESSION = args.session!;
 const POLL_MS = Number(args.poll);
-const MAX_ATTEMPTS = 5;
-const RETRY_INTERVAL_MS = 30_000; // 30s between re-injects
+const MAX_RETRY = 5;
+const RETRY_INTERVAL_MS = 30_000;
 
 const headers = {
   "content-type": "application/json",
   "x-mesh-secret": SECRET,
 };
 
-// Track injected messages: id → { attempts, lastInjectedAt }
-const tracker: Map<string, { attempts: number; lastInjectedAt: number }> = new Map();
+// Track failed injects for retry: id → { attempts, lastAttemptAt }
+const retryQueue: Map<string, { attempts: number; lastAttemptAt: number; msg: any }> = new Map();
 
 async function meshFetch(path: string, opts?: RequestInit) {
   const res = await fetch(`${MESH}${path}`, { ...opts, headers });
@@ -70,53 +70,47 @@ async function pollAndInject() {
   if (processing) return;
 
   try {
+    // Process new unread messages
     const msgs = await meshFetch(`/messages/${AGENT}?unread=true`);
-    if (!msgs.length) {
-      // All messages read — clean up tracker
-      tracker.clear();
-      return;
-    }
 
     processing = true;
-    const now = Date.now();
 
     for (const msg of msgs) {
-      const tracked = tracker.get(msg.id);
+      // Skip if already in retry queue (handled below)
+      if (retryQueue.has(msg.id)) continue;
 
-      if (tracked) {
-        // Already injected before — check if we should retry
-        if (tracked.attempts >= MAX_ATTEMPTS) {
-          // Give up, but message stays unread on server (safety net for mesh_poll)
-          continue;
-        }
-        if (now - tracked.lastInjectedAt < RETRY_INTERVAL_MS) {
-          // Too soon to retry
-          continue;
-        }
-        // Re-inject
-        const injected = `[mesh:${msg.from_agent}] ${msg.body}`;
-        if (tmuxSend(SESSION, injected)) {
-          tracked.attempts++;
-          tracked.lastInjectedAt = now;
-          console.log(`🔄 Re-injected (attempt ${tracked.attempts}/${MAX_ATTEMPTS}): ${msg.body.slice(0, 60)}...`);
-        }
+      const injected = `[mesh:${msg.from_agent}] ${msg.body}`;
+      if (tmuxSend(SESSION, injected)) {
+        // Success — mark as read immediately
+        await meshFetch(`/messages/${msg.id}/read`, { method: "PATCH" });
+        console.log(`📨 Injected + read: ${msg.from_agent}: ${msg.body.slice(0, 60)}...`);
       } else {
-        // First time seeing this message — inject
-        const injected = `[mesh:${msg.from_agent}] ${msg.body}`;
-        if (tmuxSend(SESSION, injected)) {
-          tracker.set(msg.id, { attempts: 1, lastInjectedAt: now });
-          console.log(`📨 Injected from ${msg.from_agent}: ${msg.body.slice(0, 60)}...`);
-        } else {
-          console.error(`Failed to inject from ${msg.from_agent}, will retry`);
-          tracker.set(msg.id, { attempts: 0, lastInjectedAt: 0 }); // retry immediately next cycle
-        }
+        // Failed to inject — add to retry queue, DON'T mark read
+        retryQueue.set(msg.id, { attempts: 1, lastAttemptAt: Date.now(), msg });
+        console.error(`❌ Inject failed, queued for retry: ${msg.body.slice(0, 60)}...`);
       }
     }
 
-    // Clean up tracker entries for messages that are no longer unread
-    const unreadIds = new Set(msgs.map((m: any) => m.id));
-    for (const id of tracker.keys()) {
-      if (!unreadIds.has(id)) tracker.delete(id);
+    // Process retry queue
+    const now = Date.now();
+    for (const [id, entry] of retryQueue) {
+      if (entry.attempts >= MAX_RETRY) {
+        console.error(`💀 Gave up after ${MAX_RETRY} attempts: ${entry.msg.body.slice(0, 60)}...`);
+        retryQueue.delete(id);
+        continue;
+      }
+      if (now - entry.lastAttemptAt < RETRY_INTERVAL_MS) continue;
+
+      const injected = `[mesh:${entry.msg.from_agent}] ${entry.msg.body}`;
+      if (tmuxSend(SESSION, injected)) {
+        await meshFetch(`/messages/${id}/read`, { method: "PATCH" });
+        console.log(`🔄 Retry success (attempt ${entry.attempts + 1}): ${entry.msg.body.slice(0, 60)}...`);
+        retryQueue.delete(id);
+      } else {
+        entry.attempts++;
+        entry.lastAttemptAt = now;
+        console.error(`🔄 Retry failed (attempt ${entry.attempts}/${MAX_RETRY})`);
+      }
     }
   } catch (e: any) {
     console.error(`Poll error: ${e.message}`);
@@ -126,8 +120,8 @@ async function pollAndInject() {
 }
 
 // --- Start ---
-console.log(`🕸️  Mesh Client v3 (inject + retry) | agent=${AGENT} | session=${SESSION} | mesh=${MESH}`);
-console.log(`   Polling every ${POLL_MS}ms | Max ${MAX_ATTEMPTS} inject attempts | Retry every ${RETRY_INTERVAL_MS / 1000}s`);
+console.log(`🕸️  Mesh Client v3.1 (inject + retry on failure) | agent=${AGENT} | session=${SESSION} | mesh=${MESH}`);
+console.log(`   Polling every ${POLL_MS}ms | Max ${MAX_RETRY} retries on inject failure`);
 
 await register();
 setInterval(pollAndInject, POLL_MS);
