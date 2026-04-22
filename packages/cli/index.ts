@@ -11,6 +11,9 @@ import { spawn } from "child_process";
 
 const CONFIG_DIR = join(process.env.HOME ?? "~", ".meshterm");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
+const DAEMON_PID_FILE = join(CONFIG_DIR, "daemon.pid");
+const DAEMON_LOG_FILE = join(CONFIG_DIR, "daemon.log");
+const DAEMON_INFO_FILE = join(CONFIG_DIR, "daemon.json");
 
 interface Config {
   server: string;
@@ -43,6 +46,175 @@ async function meshFetch(path: string, config: Config, opts?: RequestInit) {
     throw new Error(`Mesh ${res.status}: ${await res.text()}`);
   }
   return res.json();
+}
+
+// --- Daemon Helpers ---
+
+interface DaemonInfo {
+  agent: string;
+  session: string;
+  startTime: number;
+  pid: number;
+}
+
+function isDaemonRunning(): { running: boolean; pid?: number; info?: DaemonInfo } {
+  if (!existsSync(DAEMON_PID_FILE)) {
+    return { running: false };
+  }
+
+  try {
+    const pid = parseInt(readFileSync(DAEMON_PID_FILE, "utf-8").trim(), 10);
+    
+    // Check if process is still running
+    try {
+      process.kill(pid, 0); // Signal 0 checks existence without killing
+      
+      // Read daemon info
+      let info: DaemonInfo | undefined;
+      if (existsSync(DAEMON_INFO_FILE)) {
+        info = JSON.parse(readFileSync(DAEMON_INFO_FILE, "utf-8"));
+      }
+      
+      return { running: true, pid, info };
+    } catch {
+      // Process doesn't exist, clean up stale files
+      return { running: false };
+    }
+  } catch {
+    return { running: false };
+  }
+}
+
+function startDaemon(agent: string, session: string, config: Config) {
+  const status = isDaemonRunning();
+  if (status.running) {
+    console.error(`❌ Daemon already running (PID ${status.pid})`);
+    process.exit(1);
+  }
+
+  // Ensure config dir exists
+  if (!existsSync(CONFIG_DIR)) {
+    mkdirSync(CONFIG_DIR, { recursive: true });
+  }
+
+  const clientPath = join(import.meta.dir, "../client/mesh-client.ts");
+  
+  // Open log file
+  const logFd = Bun.file(DAEMON_LOG_FILE).writer();
+  
+  // Spawn detached process
+  const proc = spawn(
+    "bun",
+    [
+      "run",
+      clientPath,
+      "--agent", agent,
+      "--session", session,
+      "--mesh", config.server,
+      "--secret", config.secret,
+      "--poll", args.poll ?? "5000",
+      "--type", args.type ?? "unknown",
+      "--host", args.host ?? "unknown",
+    ],
+    {
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    }
+  );
+
+  // Redirect stdout/stderr to log file
+  proc.stdout?.on("data", (data) => {
+    logFd.write(data);
+  });
+  proc.stderr?.on("data", (data) => {
+    logFd.write(data);
+  });
+
+  // Unref so parent can exit
+  proc.unref();
+
+  // Write PID file
+  writeFileSync(DAEMON_PID_FILE, proc.pid!.toString());
+
+  // Write daemon info
+  const info: DaemonInfo = {
+    agent,
+    session,
+    startTime: Date.now(),
+    pid: proc.pid!,
+  };
+  writeFileSync(DAEMON_INFO_FILE, JSON.stringify(info, null, 2));
+
+  console.log(`✅ Daemon started (PID ${proc.pid})`);
+  console.log(`   Agent: ${agent}`);
+  console.log(`   Session: ${session}`);
+  console.log(`   Log: ${DAEMON_LOG_FILE}`);
+}
+
+function stopDaemon() {
+  const status = isDaemonRunning();
+  
+  if (!status.running) {
+    console.log("Daemon not running");
+    
+    // Clean up stale files
+    if (existsSync(DAEMON_PID_FILE)) {
+      Bun.file(DAEMON_PID_FILE).writer().end();
+    }
+    if (existsSync(DAEMON_INFO_FILE)) {
+      Bun.file(DAEMON_INFO_FILE).writer().end();
+    }
+    
+    return;
+  }
+
+  try {
+    process.kill(status.pid!, "SIGTERM");
+    console.log(`✅ Daemon stopped (PID ${status.pid})`);
+    
+    // Clean up files
+    if (existsSync(DAEMON_PID_FILE)) {
+      Bun.file(DAEMON_PID_FILE).writer().end();
+    }
+    if (existsSync(DAEMON_INFO_FILE)) {
+      Bun.file(DAEMON_INFO_FILE).writer().end();
+    }
+  } catch (err: any) {
+    console.error(`❌ Failed to stop daemon: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+function showDaemonStatus() {
+  const status = isDaemonRunning();
+  
+  if (!status.running) {
+    console.log("🔴 Daemon: stopped");
+    return;
+  }
+
+  console.log("🟢 Daemon: running");
+  console.log(`   PID: ${status.pid}`);
+  
+  if (status.info) {
+    console.log(`   Agent: ${status.info.agent}`);
+    console.log(`   Session: ${status.info.session}`);
+    
+    const uptimeMs = Date.now() - status.info.startTime;
+    const uptimeSec = Math.floor(uptimeMs / 1000);
+    const uptimeMin = Math.floor(uptimeSec / 60);
+    const uptimeHr = Math.floor(uptimeMin / 60);
+    
+    if (uptimeHr > 0) {
+      console.log(`   Uptime: ${uptimeHr}h ${uptimeMin % 60}m`);
+    } else if (uptimeMin > 0) {
+      console.log(`   Uptime: ${uptimeMin}m ${uptimeSec % 60}s`);
+    } else {
+      console.log(`   Uptime: ${uptimeSec}s`);
+    }
+  }
+  
+  console.log(`   Log: ${DAEMON_LOG_FILE}`);
 }
 
 const { values: args, positionals } = parseArgs({
@@ -439,6 +611,36 @@ switch (command) {
       proc.on("exit", (code) => process.exit(code ?? 0));
     } else {
       console.log("Usage: meshterm server start");
+    }
+    break;
+  }
+
+  case "daemon": {
+    const [subcommand] = rest;
+    const config = loadConfig();
+    if (!config) {
+      console.error("❌ Not configured. Run: meshterm init");
+      process.exit(1);
+    }
+
+    if (subcommand === "start") {
+      const agent = args.agent ?? config.agent;
+      const session = args.session;
+      if (!session) {
+        console.error("Usage: meshterm daemon start --agent <name> --session <tmux-session>");
+        process.exit(1);
+      }
+
+      startDaemon(agent, session, config);
+    } else if (subcommand === "stop") {
+      stopDaemon();
+    } else if (subcommand === "status") {
+      showDaemonStatus();
+    } else {
+      console.log("Usage: meshterm daemon <start|stop|status>");
+      console.log("  start --agent <name> --session <tmux-session>  Start daemon");
+      console.log("  stop                                            Stop daemon");
+      console.log("  status                                          Show daemon status");
     }
     break;
   }
