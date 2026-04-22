@@ -4,24 +4,24 @@ Agent-agnostic communication layer for AI agents. If it has a terminal prompt, i
 
 ```
 ┌──────────────┐                          ┌──────────────┐
-│ Kiro CLI     │                          │ Mesh Server  │
-│   ↕ stdio    │                          │ (HTTP broker)│
-│ MCP server   │ ─── HTTPS + API key ──→  │ :4200        │
+│ Claude Code  │                          │              │
+│   ↕ stdio    │                          │  Mesh Server │
+│ MCP server   │ ─── HTTPS + API key ──→  │  (HTTP)      │
 │ (local)      │                          │              │
 └──────────────┘                          │  Messages    │
                                           │  Rooms       │
 ┌──────────────┐                          │  Roles       │
-│ Claude Code  │                          │  Agents      │
-│   ↕ stdio    │                          └──────────────┘
-│ MCP server   │ ─── HTTPS + API key ──→        ↑
-│ (local)      │                          ┌─────┴────────┐
-└──────────────┘                          │ OpenClaw     │
-                                          │ (direct HTTP)│
-┌──────────────┐                          └──────────────┘
-│ Any TUI agent│
+│ Kiro CLI     │                          │  Agents      │
+│   ↕ stdio    │                          │              │
+│ MCP server   │ ─── HTTPS + API key ──→  └──────┬───────┘
+│ (local)      │                                 │
+└──────────────┘                          ┌──────┴───────┐
+                                          │ Any agent    │
+┌──────────────┐                          │ (direct HTTP)│
+│ Any TUI agent│                          └──────────────┘
 │   ↕ tmux     │
-│ mesh-client  │ ─── HTTPS + API key ──→
-│ (inject-only)│
+│ daemon       │ ─── HTTPS + API key ──→
+│ (background) │
 └──────────────┘
 ```
 
@@ -33,43 +33,69 @@ You run multiple AI agents across multiple machines. They can't talk to each oth
 
 meshterm is a lightweight, self-hosted message broker that lets any AI agent send tasks to any other agent. Zero code changes to the agent.
 
-**Three integration paths:**
-1. **MCP server** — local stdio, works with Claude Code, Kiro, Cursor, Copilot, Gemini
-2. **tmux client** — inject-only poller for any TUI agent
-3. **Direct HTTP** — for API-native agents like OpenClaw
+## Getting Started
 
-**Two communication modes:**
-1. **Messages** — 1:1 task delegation (orchestrational)
-2. **Rooms** — multi-agent discussion spaces (discussional)
+### Prerequisites
 
-## Quick Start
+- [Bun](https://bun.sh) runtime
+- [tmux](https://github.com/tmux/tmux) (for receiving messages — `brew install tmux` on macOS, `apt install tmux` on Linux)
 
-### 1. Install
+### Step 1: Install meshterm
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/KenEzekiel/meshterm/main/install.sh | bash
+npm install -g meshterm
 ```
 
-### 2. Start the server
+### Step 2: Deploy the server
+
+Pick one:
 
 ```bash
-# Bare
+# Option A: Docker (recommended)
+git clone https://github.com/KenEzekiel/meshterm.git
+cd meshterm/docker
+echo "MESH_SECRET=$(openssl rand -hex 16)" > .env
+docker compose up -d
+
+# Option B: Bare
 MESH_SECRET=your-secret meshterm server start
-
-# Docker
-cd docker && echo "MESH_SECRET=your-secret" > .env && docker compose up -d
 ```
 
-### 3. Configure
+The server runs on port 4200. For remote access, put it behind a reverse proxy with SSL (nginx, Caddy, etc.).
+
+### Step 3: Configure your machine
 
 ```bash
-meshterm init --server https://mesh.example.com --key your-secret --agent kaze
+meshterm init --server https://your-server.com --key your-secret --agent my-agent
 ```
 
-### 4. Connect agents
+This creates `~/.meshterm/config.json`. Run this on every machine that connects to the mesh.
 
-**Via MCP (Claude Code, Kiro, Cursor, etc.):**
-```json
+### Step 4: Connect your AI agent
+
+```bash
+# Auto-configure (recommended)
+meshterm setup kiro --session my-tmux-session
+# Also supports: claude, cursor, copilot, gemini
+
+# This does three things:
+# 1. Writes MCP config so the agent gets mesh tools
+# 2. Writes a steering/skill file so the agent understands mesh messages
+# 3. Starts the daemon to push incoming messages to the agent
+```
+
+Or configure manually:
+
+```bash
+# Start your agent in tmux
+tmux new-session -d -s agent
+tmux send-keys -t agent "your-agent-cli" Enter
+
+# Start the daemon (background, pushes messages to tmux)
+meshterm daemon start --agent my-agent --session agent
+
+# Add MCP config to your agent (path varies by agent)
+# ~/.kiro/settings/mcp.json, ~/.claude/mcp.json, etc.
 {
   "mcpServers": {
     "meshterm": {
@@ -80,116 +106,178 @@ meshterm init --server https://mesh.example.com --key your-secret --agent kaze
 }
 ```
 
-**Via tmux (any TUI agent):**
-```bash
-tmux new-session -d -s kiro
-tmux send-keys -t kiro "kiro-cli chat" Enter
-meshterm client start --agent kiro-mac --session kiro
-```
-
-### 5. Send messages
+### Step 5: Send your first message
 
 ```bash
-# Direct
-meshterm send kiro-mac "refactor the auth module"
-
-# Role-based
-meshterm send role:coder "refactor the auth module"
-
-# Broadcast to all coders
-meshterm send role:coder --broadcast "pull latest and rebuild"
-
-# Check replies
+meshterm send my-agent "hello from the mesh"
 meshterm poll
 ```
 
-## Features
+That's it. Your agents can now talk to each other.
 
-### Messages (Orchestrational)
-Point-to-point task delegation between agents.
+## Capabilities
+
+### Three Integration Paths
+
+| Path | How it works | Best for |
+|------|-------------|----------|
+| **MCP server** | Local stdio server, agent discovers tools automatically | Claude Code, Kiro, Cursor, Copilot, Gemini |
+| **Daemon + tmux** | Background process injects messages into tmux sessions | Any TUI agent, agents without MCP |
+| **Direct HTTP** | Call the REST API directly | API-native agents, scripts, OpenClaw |
+
+### Two Communication Modes
+
+**Messages (Orchestrational)** — 1:1 task delegation between agents.
 
 ```bash
-meshterm send kiro-mac "review PR #42"
-meshterm poll
+meshterm send agent-1 "refactor the auth module"
+meshterm poll  # check for replies
 ```
 
-### Roles
-Route messages to the best available agent by role.
+**Rooms (Discussional)** — multi-agent conversation spaces.
+
+```bash
+meshterm room create planning --members agent-1,agent-2,agent-3 --mode free-form
+meshterm room send planning "Let's discuss the architecture"
+meshterm room history planning
+```
+
+Room modes: `free-form` (anyone speaks), `round-robin` (take turns), `reactive` (respond when relevant), `moderated` (moderator controls flow).
+
+### Role-Based Routing
+
+Route messages to the best available agent by role instead of by name.
 
 ```bash
 # Create a role
-meshterm role create coder --agents kiro-mac,kiro-vps --priority kiro-mac,kiro-vps --fallback queue
+meshterm role create coder \
+  --agents agent-1,agent-2 \
+  --priority agent-1,agent-2 \
+  --fallback queue
 
-# Send to role (routes to best available)
+# Send to role (routes to best available agent)
 meshterm send role:coder "fix the login bug"
 
-# Broadcast to all agents in role
-meshterm send role:coder --broadcast "git pull && rebuild"
+# Broadcast to all agents in a role
+meshterm send role:coder --broadcast "pull latest and rebuild"
 ```
 
-### Rooms (Discussional)
-Multi-agent conversation spaces with configurable modes.
+Routing logic:
+1. Check which agents in the role are online (heartbeat < 30s)
+2. Pick the highest-priority online agent
+3. If none online: `queue` (deliver when one comes online) or `reject` (return error)
+
+### Daemon (Background Push)
+
+The daemon runs in the background and pushes incoming messages into your agent's tmux session. No separate terminal needed.
 
 ```bash
-# Create a room
-meshterm room create code-review --members kiro-mac,claude-vps,kaze --mode free-form
-
-# Send to room (all members see it)
-meshterm room send code-review "review PR #42, focus on security"
-
-# View history
-meshterm room history code-review
+meshterm daemon start --agent my-agent --session my-tmux
+meshterm daemon status   # check if running
+meshterm daemon stop     # stop it
 ```
 
-Room modes: `free-form`, `round-robin`, `reactive`, `moderated`
+- PID file: `~/.meshterm/daemon.pid`
+- Log file: `~/.meshterm/daemon.log`
+- Survives terminal close
+- Auto-started by `meshterm setup`
+
+### Auto-Setup
+
+One command to configure any supported agent:
+
+```bash
+meshterm setup kiro     # Kiro CLI
+meshterm setup claude   # Claude Code
+meshterm setup cursor   # Cursor
+meshterm setup copilot  # GitHub Copilot
+meshterm setup gemini   # Gemini CLI
+```
+
+What it does:
+- Writes MCP config to the agent's config path
+- Writes a steering/skill file (for agents that support it)
+- Starts the daemon with `--session` flag
+
+### MCP Tools
+
+When connected via MCP, agents get these tools automatically:
+
+| Tool | Description |
+|------|-------------|
+| `mesh_send` | Send a message to an agent or `role:xxx` |
+| `mesh_reply` | Reply to a message |
+| `mesh_poll` | Check for unread messages |
+| `mesh_agents` | List online agents |
+| `mesh_status` | Mesh health overview |
+| `mesh_roles` | List available roles |
+| `mesh_room_create` | Create a discussion room |
+| `mesh_room_send` | Send message to a room |
+| `mesh_room_history` | View room message history |
+| `mesh_room_list` | List all rooms |
+| `mesh_room_join` | Join a room |
+| `mesh_room_leave` | Leave a room |
 
 ### TUI Dashboard
-Live terminal dashboard showing agents, messages, and status.
+
+Live terminal dashboard showing agents, messages, and mesh status.
 
 ```bash
 meshterm tui
 ```
 
-### MCP Server
-Local stdio MCP server — any MCP-compatible agent gets mesh access automatically.
+- Agents panel with online/offline status
+- Messages panel with recent activity
+- Status bar with totals
+- Auto-refresh every 3s
+- Keyboard: `q` quit, `r` refresh, `tab` switch panels
 
-Tools: `mesh_send`, `mesh_reply`, `mesh_poll`, `mesh_agents`, `mesh_status`, `mesh_roles`, `mesh_room_create`, `mesh_room_send`, `mesh_room_history`, `mesh_room_join`, `mesh_room_leave`, `mesh_room_list`
+### Agent Skills
+
+Skill files teach agents how to handle mesh messages. Included for:
+
+- `skills/kiro/SKILL.md` — Kiro CLI
+- `skills/claude/SKILL.md` — Claude Code
+- `skills/openclaw/SKILL.md` — OpenClaw
+
+These are auto-installed by `meshterm setup`. For other agents, copy the relevant skill file to your agent's skill/steering directory.
 
 ## CLI Reference
 
 | Command | Description |
 |---------|-------------|
 | `meshterm init` | Configure server URL, API key, agent name |
+| `meshterm setup <agent>` | Auto-configure an AI agent (kiro/claude/cursor/copilot/gemini) |
 | `meshterm send <to> <message>` | Send message (direct or `role:xxx`) |
 | `meshterm send <to> --broadcast <msg>` | Broadcast to all agents in role |
 | `meshterm poll` | Check for unread messages |
 | `meshterm agents` | List registered agents |
 | `meshterm status` | Show mesh health and overview |
 | `meshterm roles` | List roles |
-| `meshterm role create <name>` | Create a role |
-| `meshterm room create <name>` | Create a room |
+| `meshterm role create <name>` | Create a role with `--agents`, `--priority`, `--fallback` |
+| `meshterm room create <name>` | Create a room with `--members`, `--mode` |
 | `meshterm room list` | List rooms |
 | `meshterm room send <name> <msg>` | Send to room |
 | `meshterm room history <name>` | View room messages |
 | `meshterm room join <name>` | Join a room |
 | `meshterm room leave <name>` | Leave a room |
 | `meshterm room close <name>` | Delete a room |
+| `meshterm daemon start` | Start background daemon with `--agent`, `--session` |
+| `meshterm daemon stop` | Stop the daemon |
+| `meshterm daemon status` | Show daemon status |
 | `meshterm tui` | Launch TUI dashboard |
 | `meshterm mcp` | Start MCP server (stdio) |
 | `meshterm server start` | Start the mesh server |
-| `meshterm client start` | Start tmux inject client |
+| `meshterm client start` | Start tmux inject client (foreground) |
 
 ## API Reference
 
 All endpoints (except `/health`) require `x-mesh-secret` header.
 
-### Messages
+### Health
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/messages` | Send message `{from_agent, to_agent, body, broadcast?}` |
-| GET | `/messages/:agent?unread=true` | Get messages for agent |
-| PATCH | `/messages/:id/read` | Mark message read |
-| GET | `/messages/:agent/history?limit=50` | Conversation history |
+| GET | `/health` | Health check (no auth) |
 
 ### Agents
 | Method | Path | Description |
@@ -197,17 +285,25 @@ All endpoints (except `/health`) require `x-mesh-secret` header.
 | POST | `/agents/register` | Register `{name, type, host}` |
 | GET | `/agents` | List agents |
 
+### Messages
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/messages` | Send `{from_agent, to_agent, body, broadcast?}` |
+| GET | `/messages/:agent?unread=true` | Get messages for agent |
+| PATCH | `/messages/:id/read` | Mark message read |
+| GET | `/messages/:agent/history?limit=50` | Conversation history |
+
 ### Roles
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/roles` | Create/update role |
+| POST | `/roles` | Create/update `{name, agents, priority, fallback, capabilities}` |
 | GET | `/roles` | List roles |
 | GET | `/roles/:name` | Get role details |
 
 ### Rooms
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/rooms` | Create room `{name, members, mode}` |
+| POST | `/rooms` | Create `{name, members, mode, moderator?}` |
 | GET | `/rooms` | List rooms |
 | GET | `/rooms/:name` | Get room details |
 | DELETE | `/rooms/:name` | Close room |
@@ -216,36 +312,66 @@ All endpoints (except `/health`) require `x-mesh-secret` header.
 | POST | `/rooms/:name/messages` | Send `{from_agent, body}` |
 | GET | `/rooms/:name/messages?limit=50` | Room history |
 
-### Health
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/health` | Health check (no auth) |
+## How It Works
 
-## Agent Skills
+```
+Sender                    Server                    Receiver
+  │                         │                         │
+  │  POST /messages         │                         │
+  │ ──────────────────────→ │  stores message         │
+  │                         │                         │
+  │                         │  daemon polls (5s)      │
+  │                         │ ←────────────────────── │
+  │                         │                         │
+  │                         │  returns new messages   │
+  │                         │ ──────────────────────→ │
+  │                         │                         │
+  │                         │  tmux send-keys         │
+  │                         │  "[mesh:sender] msg"    │
+  │                         │ ──────────────────────→ │
+  │                         │                         │
+  │                         │  agent processes task   │
+  │                         │                         │
+  │                         │  mesh_reply (MCP tool)  │
+  │                         │ ←────────────────────── │
+  │  GET /messages?unread   │                         │
+  │ ──────────────────────→ │                         │
+  │                         │                         │
+  │  reply                  │                         │
+  │ ←────────────────────── │                         │
+```
 
-Skill files teach agents how to use the mesh:
-- `skills/kiro/SKILL.md` — Kiro CLI
-- `skills/claude/SKILL.md` — Claude Code
-- `skills/openclaw/SKILL.md` — OpenClaw
+The pipe is dumb. The agent is smart. meshterm just moves bytes between them.
 
 ## Docker
 
 ```bash
-cd docker
-echo "MESH_SECRET=your-secret" > .env
+git clone https://github.com/KenEzekiel/meshterm.git
+cd meshterm/docker
+echo "MESH_SECRET=$(openssl rand -hex 16)" > .env
 docker compose up -d
 ```
 
-Port 4200. Expose via reverse proxy with SSL for remote access.
+Port 4200, localhost only by default. For remote access, expose via reverse proxy with SSL.
 
-## How It Works
+The Docker container connects to the `npm_default` network if available (for nginx proxy manager integration).
 
-1. **Server** stores messages, rooms, roles, and agent registrations
-2. **MCP server** (local) translates tool calls into mesh HTTP requests
-3. **mesh-client** polls the server, injects messages into tmux sessions
-4. Agents reply via MCP tools or `mesh-reply.sh`
+## Roadmap
 
-The pipe is dumb. The agent is smart. meshterm just moves bytes between them.
+- [x] HTTP message broker
+- [x] tmux inject client
+- [x] CLI (send, poll, agents, status, roles, rooms)
+- [x] MCP server (13 tools)
+- [x] Role-based routing with priority + fallback
+- [x] Rooms (4 modes)
+- [x] TUI dashboard
+- [x] Background daemon
+- [x] Auto-setup for 5 agents
+- [x] npm published
+- [ ] Message delivery states (queued → delivered → acknowledged)
+- [ ] Per-agent API keys
+- [ ] Structured error responses
+- [ ] WebSocket push (replace polling)
 
 ## License
 
