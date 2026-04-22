@@ -5,7 +5,7 @@
  */
 
 import { parseArgs } from "util";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, openSync, closeSync } from "fs";
 import { join } from "path";
 import { spawn } from "child_process";
 
@@ -99,10 +99,10 @@ function startDaemon(agent: string, session: string, config: Config) {
 
   const clientPath = join(import.meta.dir, "../client/mesh-client.ts");
   
-  // Open log file
-  const logFd = Bun.file(DAEMON_LOG_FILE).writer();
+  // Open log file for writing (append mode)
+  const logFd = openSync(DAEMON_LOG_FILE, "a");
   
-  // Spawn detached process
+  // Spawn detached process with output redirected to log file
   const proc = spawn(
     "bun",
     [
@@ -118,20 +118,15 @@ function startDaemon(agent: string, session: string, config: Config) {
     ],
     {
       detached: true,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["ignore", logFd, logFd],
     }
   );
 
-  // Redirect stdout/stderr to log file
-  proc.stdout?.on("data", (data) => {
-    logFd.write(data);
-  });
-  proc.stderr?.on("data", (data) => {
-    logFd.write(data);
-  });
-
   // Unref so parent can exit
   proc.unref();
+  
+  // Close log fd so parent can exit
+  closeSync(logFd);
 
   // Write PID file
   writeFileSync(DAEMON_PID_FILE, proc.pid!.toString());
@@ -159,10 +154,10 @@ function stopDaemon() {
     
     // Clean up stale files
     if (existsSync(DAEMON_PID_FILE)) {
-      Bun.file(DAEMON_PID_FILE).writer().end();
+      unlinkSync(DAEMON_PID_FILE);
     }
     if (existsSync(DAEMON_INFO_FILE)) {
-      Bun.file(DAEMON_INFO_FILE).writer().end();
+      unlinkSync(DAEMON_INFO_FILE);
     }
     
     return;
@@ -174,10 +169,10 @@ function stopDaemon() {
     
     // Clean up files
     if (existsSync(DAEMON_PID_FILE)) {
-      Bun.file(DAEMON_PID_FILE).writer().end();
+      unlinkSync(DAEMON_PID_FILE);
     }
     if (existsSync(DAEMON_INFO_FILE)) {
-      Bun.file(DAEMON_INFO_FILE).writer().end();
+      unlinkSync(DAEMON_INFO_FILE);
     }
   } catch (err: any) {
     console.error(`❌ Failed to stop daemon: ${err.message}`);
@@ -831,7 +826,25 @@ Use the \`mesh_reply\` MCP tool to respond. If you don't reply, the sender never
         console.log(`✅ Steering file written to ${agentConfig.steeringPath}`);
       }
 
-      // 3. Print summary and next steps
+      // 3. Ask for tmux session and auto-start daemon
+      const config = loadConfig()!;
+      let tmuxSession = args.session;
+      
+      if (!tmuxSession) {
+        tmuxSession = prompt(`Tmux session name for ${agentType}:`, agentType);
+      }
+      
+      if (tmuxSession) {
+        console.log(`\n🚀 Starting daemon for ${config.agent}...`);
+        try {
+          startDaemon(config.agent, tmuxSession, config);
+        } catch (err: any) {
+          console.warn(`⚠️  Could not start daemon: ${err.message}`);
+          console.log("You can start it manually later with: meshterm daemon start --session <tmux-session>");
+        }
+      }
+
+      // 4. Print summary and next steps
       console.log(`\n🎉 ${agentType} configured for meshterm!\n`);
       console.log("Next steps:");
       
@@ -850,6 +863,12 @@ Use the \`mesh_reply\` MCP tool to respond. If you don't reply, the sender never
       }
       
       console.log(`  ${agentType === "kiro" || agentType === "claude" ? "3" : "2"}. Test with: meshterm agents`);
+      
+      if (tmuxSession) {
+        console.log(`\n✅ Daemon is running in background (session: ${tmuxSession})`);
+        console.log(`   Check status: meshterm daemon status`);
+        console.log(`   View logs: tail -f ${DAEMON_LOG_FILE}`);
+      }
     } catch (err: any) {
       console.error(`❌ Setup failed: ${err.message}`);
       process.exit(1);
@@ -862,8 +881,9 @@ Use the \`mesh_reply\` MCP tool to respond. If you don't reply, the sender never
 
 Commands:
   init                                    Configure meshterm (server URL, API key, agent name)
-  setup <agent-type>                      Auto-configure an AI agent to use meshterm
+  setup <agent-type> [--session <tmux>]   Auto-configure an AI agent to use meshterm
                                           Supported: kiro, claude, cursor, copilot, gemini
+                                          Optionally starts daemon with --session flag
   send <to> <message> [--broadcast]       Send a message to another agent or role
   poll                                    Check for unread messages
   agents                                  List registered agents
@@ -881,16 +901,22 @@ Commands:
   room join <name>                        Join a room
   room leave <name>                       Leave a room
   room close <name>                       Close/delete a room
+  daemon start --agent <name> --session <tmux>  Start background daemon (auto-injects messages)
+  daemon stop                             Stop the daemon
+  daemon status                           Show daemon status (PID, uptime, session)
   status                                  Show mesh status (agents, messages, health)
   tui                                     Launch terminal dashboard
   mcp                                     Start MCP server (stdio transport for AI assistants)
   server start                            Start the mesh server
-  client start --agent <name> --session <tmux>  Start the tmux inject client
+  client start --agent <name> --session <tmux>  Start the tmux inject client (foreground)
 
 Examples:
   meshterm init --server https://mesh.example.com --key sk_xxx --agent my-agent
-  meshterm setup kiro
+  meshterm setup kiro --session kiro
   meshterm setup claude
+  meshterm daemon start --agent kiro-mac --session kiro
+  meshterm daemon status
+  meshterm daemon stop
   meshterm send agent-1 "refactor auth module"
   meshterm send role:coder "review auth module"
   meshterm send role:coder --broadcast "system update in 5 min"
