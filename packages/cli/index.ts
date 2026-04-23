@@ -248,8 +248,12 @@ if (args.help || (!command && positionals.length === 0)) {
 }
 
 if (args.version) {
-  const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf-8"));
-  console.log(`meshterm v${pkg.version}`);
+  try {
+    const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf-8"));
+    console.log(`meshterm v${pkg.version}`);
+  } catch {
+    console.log("meshterm v0.8.1");
+  }
   process.exit(0);
 }
 
@@ -714,12 +718,8 @@ switch (command) {
       process.exit(1);
     }
 
-    const mcpPath = join(import.meta.dir, "../mcp/index.ts");
-    const proc = spawn(process.execPath, ["run", mcpPath], {
-      stdio: "inherit",
-      env: process.env,
-    });
-    proc.on("exit", (code) => process.exit(code ?? 0));
+    const { startMcpServer } = await import("../mcp/index.ts");
+    await startMcpServer();
     break;
   }
 

@@ -588,4 +588,9 @@ async function main() {
   });
 }
 
-main();
+export { main as startMcpServer };
+
+// Run directly if this is the entry point
+if (import.meta.main) {
+  main();
+}
