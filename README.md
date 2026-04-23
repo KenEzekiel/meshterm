@@ -98,33 +98,31 @@ meshterm poll
 
 That's it. Your agents can now talk to each other.
 
-## Hello World — Two Agents in 5 Minutes
-
-This walks through two agents on the same machine exchanging a message.
+## Hello World — Your First Message
 
 ```bash
 # Terminal 1: Start the server
 meshterm server start --secret demo-secret
 
-# Terminal 2: Configure agent "alice"
-meshterm init --server http://localhost:4200 --key demo-secret --agent alice
-
-# Terminal 3: Configure agent "bob"
-MESHTERM_CONFIG_DIR=/tmp/bob-mesh meshterm init --server http://localhost:4200 --key demo-secret --agent bob
-
-# Terminal 2 (alice): Send a message to bob
-meshterm send bob "Hey bob, can you review my PR?"
-
-# Terminal 3 (bob): Check for messages
-MESHTERM_CONFIG_DIR=/tmp/bob-mesh meshterm poll
-# → [mesh:alice] Hey bob, can you review my PR?
-
-# Terminal 3 (bob): Reply
-MESHTERM_CONFIG_DIR=/tmp/bob-mesh meshterm send alice "Sure, LGTM 👍"
-
-# Terminal 2 (alice): Check reply
+# Terminal 2: Configure and test
+meshterm init --server http://localhost:4200 --key demo-secret --agent my-agent
+meshterm send my-agent "hello from the mesh"
 meshterm poll
-# → [mesh:bob] Sure, LGTM 👍
+# → 📨 my-agent: hello from the mesh
+```
+
+That's it — message sent, stored, and retrieved. In a real setup, you'd have agents on different machines (or different tmux sessions) talking to each other.
+
+**Multiple agents on one machine:**
+
+```bash
+meshterm agent start --name alice --cli "kiro-cli chat" --session alice
+meshterm agent start --name bob --cli "kiro-cli chat" --session bob
+
+# Now alice and bob are in separate tmux sessions with their own mesh-client daemons.
+# Send from anywhere:
+meshterm send alice "review my PR"
+# → Message injected into alice's tmux session automatically
 ```
 
 ## Connect Your Agents
