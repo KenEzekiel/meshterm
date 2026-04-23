@@ -301,6 +301,10 @@ When connected via MCP, agents get these tools automatically:
 | **Tools** | |
 | `meshterm tui` | Launch terminal dashboard |
 | `meshterm mcp` | Start MCP server (stdio) |
+| **Agent Lifecycle** | |
+| `meshterm agent start` | Start agent: creates tmux session + CLI + mesh-client (`--name`, `--cli`, `--session`) |
+| `meshterm agent stop` | Stop agent cleanly (`--name`, `--kill-session`) |
+| `meshterm agent list` | Show running agents with status |
 
 ## API Reference
 

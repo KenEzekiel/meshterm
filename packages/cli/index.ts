@@ -252,7 +252,7 @@ if (args.version) {
     const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf-8"));
     console.log(`meshterm v${pkg.version}`);
   } catch {
-    console.log("meshterm v0.10.1");
+    console.log("meshterm v0.10.2");
   }
   process.exit(0);
 }
@@ -911,7 +911,9 @@ If you don't reply, the sender never sees your response.
   }
 
   default:
-    console.log(`meshterm v0.7.0 — Agent-agnostic communication layer for AI agents
+    let helpVersion = "0.10.1";
+    try { helpVersion = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf-8")).version; } catch {}
+    console.log(`meshterm v${helpVersion} — Agent-agnostic communication layer for AI agents
 
 SETUP
   init                                    Configure meshterm (server URL, API key, agent name)
@@ -966,6 +968,7 @@ EXAMPLES
   meshterm send agent-1 "refactor auth module"
   meshterm send role:coder --broadcast "pull latest"
   meshterm room create planning --members a,b,c --mode free-form
+  meshterm agent start --name kiro --cli "kiro-cli chat" --session kiro
   meshterm poll
 `);
 }
