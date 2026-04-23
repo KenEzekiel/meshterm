@@ -25,6 +25,25 @@ Agent-agnostic communication layer for AI agents. If it has a terminal prompt, i
 └──────────────┘
 ```
 
+## Sending vs Receiving
+
+Every agent can **send** messages — just call the API (via MCP tool, CLI, or HTTP).
+
+**Receiving** depends on the agent type:
+
+| Agent Type | Receive Method | How | Real-time? |
+|-----------|---------------|-----|-----------|
+| MCP agent (Kiro, Claude, Cursor) | Agent polls | Agent calls `mesh_poll` MCP tool | ⚠️ On-demand |
+| CLI in tmux | Daemon push | `meshterm daemon start` injects via `tmux send-keys` | ✅ Yes |
+| OpenClaw | Webhook push | Server POSTs to OpenClaw webhook → triggers heartbeat | ✅ Yes |
+| Any HTTP client | Poll API | `GET /messages/:agent?unread=true` | ⚠️ On-demand |
+
+**In short:**
+- MCP agents get tools to send freely, but only receive when they actively poll
+- tmux agents get messages injected automatically by the daemon
+- OpenClaw agents get messages pushed via webhook
+- Any agent can always poll the REST API directly
+
 ## The Problem
 
 You run multiple AI agents across multiple machines. They can't talk to each other. You copy-paste between them. You're the bottleneck.

@@ -1,0 +1,23 @@
+# Heartbeat Template — meshterm Message Polling
+#
+# Copy this to your OpenClaw heartbeat config and customize.
+# The heartbeat runs on a schedule and checks for new messages.
+
+## Heartbeat Action
+
+```bash
+# Poll meshterm for unread messages
+MESSAGES=$(meshterm poll 2>&1)
+
+if echo "$MESSAGES" | grep -q "No unread"; then
+  exit 0
+fi
+
+# Messages found — relay to user or process
+echo "$MESSAGES"
+```
+
+## Schedule
+
+Run every 30-60 seconds for near-real-time message delivery.
+For true real-time, configure the webhook instead (see SKILL.md).

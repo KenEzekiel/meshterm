@@ -8,7 +8,8 @@
   },
   "scripts": {
     "server": "bun run packages/server/server.ts",
-    "client": "bun run packages/client/mesh-client.ts"
+    "client": "bun run packages/client/mesh-client.ts",
+    "agent": "bun run packages/agent/index.ts"
   },
   "keywords": [
     "ai",
