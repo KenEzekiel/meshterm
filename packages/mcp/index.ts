@@ -8,7 +8,7 @@ import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { createInterface } from "readline";
 
-const CONFIG_DIR = join(process.env.HOME ?? "~", ".meshterm");
+const CONFIG_DIR = process.env.MESHTERM_CONFIG_DIR ?? join(process.env.HOME ?? "~", ".meshterm");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
 interface Config {

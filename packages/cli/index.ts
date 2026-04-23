@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, openSyn
 import { join } from "path";
 import { spawn } from "child_process";
 
-const CONFIG_DIR = join(process.env.HOME ?? "~", ".meshterm");
+const CONFIG_DIR = process.env.MESHTERM_CONFIG_DIR ?? join(process.env.HOME ?? "~", ".meshterm");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 const DAEMON_PID_FILE = join(CONFIG_DIR, "daemon.pid");
 const DAEMON_LOG_FILE = join(CONFIG_DIR, "daemon.log");
@@ -252,7 +252,7 @@ if (args.version) {
     const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf-8"));
     console.log(`meshterm v${pkg.version}`);
   } catch {
-    console.log("meshterm v0.10.0");
+    console.log("meshterm v0.10.1");
   }
   process.exit(0);
 }

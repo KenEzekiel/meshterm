@@ -14,7 +14,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { spawnSync } from "child_process";
 
-const STATE_DIR = join(homedir(), ".meshterm");
+const STATE_DIR = process.env.MESHTERM_CONFIG_DIR ?? join(homedir(), ".meshterm");
 const STATE_FILE = join(STATE_DIR, "agents.json");
 
 interface AgentEntry {
