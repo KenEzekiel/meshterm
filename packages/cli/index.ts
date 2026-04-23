@@ -248,7 +248,7 @@ if (args.help || (!command && positionals.length === 0)) {
 }
 
 if (args.version) {
-  console.log("meshterm v0.6.4");
+  console.log("meshterm v0.7.0");
   process.exit(0);
 }
 
@@ -893,7 +893,7 @@ If you don't reply, the sender never sees your response.
   }
 
   default:
-    console.log(`meshterm v0.6.4 — Agent-agnostic communication layer for AI agents
+    console.log(`meshterm v0.7.0 — Agent-agnostic communication layer for AI agents
 
 SETUP
   init                                    Configure meshterm (server URL, API key, agent name)
