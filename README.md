@@ -2,6 +2,10 @@
 
 Agent-agnostic communication layer for AI agents. If it has a terminal prompt, it's on the mesh. Self-hosted, lightweight HTTP message broker that lets any AI agent send tasks to any other agent — across machines, across tools, zero code changes.
 
+> **Example:** You have Claude Code on your laptop and Kiro on your VPS. You want Claude to ask Kiro to deploy code. meshterm makes that possible — no code changes to either agent.
+
+> **⚠️ Requires [Bun](https://bun.sh) runtime.** Install it first: `curl -fsSL https://bun.sh/install | bash`
+
 ```
 ┌──────────────┐                          ┌──────────────┐
 │ Claude Code  │                          │              │
@@ -44,6 +48,8 @@ Every agent can **send** messages — just call the API (via MCP tool, CLI, or H
 - OpenClaw agents get messages pushed via webhook
 - Any agent can always poll the REST API directly
 
+> **Known limitation:** MCP agents (Kiro, Claude, Cursor) cannot receive messages in real-time. They must call `mesh_poll` to check for new messages. If no one polls, messages sit unread. The roadmap includes WebSocket push to fix this.
+
 ## Quick Start
 
 ### Prerequisites
@@ -58,6 +64,8 @@ npm install -g meshterm
 ```
 
 ### 2. Start the server
+
+Run this on the machine that will be your central hub — a VPS for cross-network setups, or your laptop if all agents are local.
 
 ```bash
 meshterm server start --port 4200 --secret your-secret
@@ -86,6 +94,35 @@ meshterm poll
 
 That's it. Your agents can now talk to each other.
 
+## Hello World — Two Agents in 5 Minutes
+
+This walks through two agents on the same machine exchanging a message.
+
+```bash
+# Terminal 1: Start the server
+meshterm server start --secret demo-secret
+
+# Terminal 2: Configure agent "alice"
+meshterm init --server http://localhost:4200 --key demo-secret --agent alice
+
+# Terminal 3: Configure agent "bob"
+MESHTERM_CONFIG_DIR=/tmp/bob-mesh meshterm init --server http://localhost:4200 --key demo-secret --agent bob
+
+# Terminal 2 (alice): Send a message to bob
+meshterm send bob "Hey bob, can you review my PR?"
+
+# Terminal 3 (bob): Check for messages
+MESHTERM_CONFIG_DIR=/tmp/bob-mesh meshterm poll
+# → [mesh:alice] Hey bob, can you review my PR?
+
+# Terminal 3 (bob): Reply
+MESHTERM_CONFIG_DIR=/tmp/bob-mesh meshterm send alice "Sure, LGTM 👍"
+
+# Terminal 2 (alice): Check reply
+meshterm poll
+# → [mesh:bob] Sure, LGTM 👍
+```
+
 ## Connect Your Agents
 
 ### MCP agents (Kiro, Claude, Cursor, Copilot, Gemini)
@@ -96,6 +133,11 @@ One command auto-configures MCP config, steering/skill files, and the daemon:
 meshterm setup kiro --session my-tmux-session
 # Also supports: claude, cursor, copilot, gemini
 ```
+
+This creates:
+- **MCP config** — adds meshterm server to `~/.kiro/settings/mcp.json` (or equivalent for other agents)
+- **Steering/skill file** — teaches the agent how to use mesh tools and handle `[mesh:...]` messages
+- **Daemon** — starts a background process that pushes incoming messages to the tmux session
 
 Or configure manually — add to your agent's MCP config (`~/.kiro/settings/mcp.json`, `~/.claude/mcp.json`, etc.):
 
@@ -125,10 +167,46 @@ meshterm daemon start --agent my-agent --session agent
 
 ### OpenClaw (webhook push)
 
-Configure webhooks on the server via environment variable:
+Configure webhooks on the server via a config file or environment variable. meshterm supports multiple webhook formats via adapters:
+
+**Config file** (`mesh-config.json` next to the server, or set `MESH_CONFIG` env):
+
+```json
+{
+  "webhooks": {
+    "my-openclaw-agent": {
+      "url": "https://your-openclaw-url/webhook",
+      "token": "your-token",
+      "format": "openclaw"
+    },
+    "slack-notifications": {
+      "url": "https://hooks.slack.com/services/xxx",
+      "format": "slack"
+    },
+    "custom-service": {
+      "url": "https://your-api.com/hook",
+      "token": "bearer-token",
+      "format": "custom",
+      "template": "{\"event\": \"mesh_message\", \"from\": \"{{from}}\", \"text\": \"{{body}}\"}"
+    }
+  }
+}
+```
+
+**Built-in adapters:**
+
+| Format | Payload | Use case |
+|--------|---------|----------|
+| `raw` | `{from_agent, to_agent, body, created_at, id}` | Generic webhooks, custom integrations |
+| `openclaw` | `{text: "[meshterm] Message from ...", mode: "now"}` | OpenClaw gateway |
+| `slack` | `{text: "*[meshterm]* Message from \`agent\`:\nmessage"}` | Slack incoming webhooks |
+| `discord` | `{content: "**[meshterm]** Message from \`agent\`:\nmessage"}` | Discord webhooks |
+| `custom` | User-defined template with `{{from}}`, `{{to}}`, `{{body}}`, `{{timestamp}}` | Anything else |
+
+**Environment variable** (backward compatible, defaults to `openclaw` format):
 
 ```bash
-MESH_WEBHOOKS="openclaw|https://your-openclaw-url/webhook|your-token" meshterm server start
+MESH_WEBHOOKS="agent-name|https://webhook-url|token" meshterm server start
 ```
 
 ## Communication Modes
