@@ -12,7 +12,7 @@ const { values: args } = parseArgs({
   options: {
     agent: { type: "string", default: "kiro-mac" },
     session: { type: "string", default: "kiro" },
-    mesh: { type: "string", default: "https://mesh.kennezekiel.tech" },
+    mesh: { type: "string", default: "http://localhost:4200" },
     secret: { type: "string", default: process.env.MESH_SECRET ?? "" },
     poll: { type: "string", default: "5000" },
     type: { type: "string", default: "kiro" },
