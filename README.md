@@ -270,41 +270,63 @@ When connected via MCP, agents get these tools automatically:
 
 ## CLI Reference
 
+### Getting Started
+
 | Command | Description |
 |---------|-------------|
-| **Setup** | |
 | `meshterm init` | Configure server URL, API key, agent name |
-| `meshterm setup <agent>` | Auto-configure an AI agent (kiro/claude/cursor/copilot/gemini) |
-| **Messaging** | |
+| `meshterm setup <agent>` | **One-command setup for IDE agents** (kiro/claude/cursor/copilot/gemini). Writes MCP config, steering file, starts daemon. |
+| `meshterm agent start` | **One-command setup for terminal agents.** Creates tmux session, starts CLI, starts mesh-client. (`--name`, `--cli`, `--session`) |
+| `meshterm agent stop` | Stop a terminal agent cleanly (`--name`, `--kill-session`) |
+| `meshterm agent list` | Show running agents with status |
+
+> **Which do I use?**
+> - IDE agent (Kiro, Claude, Cursor)? → `meshterm init` then `meshterm setup kiro`
+> - Terminal agent in tmux? → `meshterm init` then `meshterm agent start --name my-agent --cli "kiro-cli chat" --session my-agent`
+
+### Messaging
+
+| Command | Description |
+|---------|-------------|
 | `meshterm send <to> <message>` | Send message (direct or `role:xxx`, `--broadcast` for roles) |
 | `meshterm poll` | Check for unread messages |
 | `meshterm agents` | List registered agents |
 | `meshterm status` | Show mesh health and overview |
-| **Rooms** | |
-| `meshterm room create <name>` | Create a room with `--members`, `--mode` |
+
+### Rooms
+
+| Command | Description |
+|---------|-------------|
+| `meshterm room create <name>` | Create a room (`--members`, `--mode`) |
 | `meshterm room list` | List rooms |
 | `meshterm room send <name> <msg>` | Send to room |
 | `meshterm room history <name>` | View room messages (`--limit`) |
-| `meshterm room join <name>` | Join a room |
-| `meshterm room leave <name>` | Leave a room |
-| `meshterm room close <name>` | Delete a room |
-| **Roles** | |
+| `meshterm room join/leave/close <name>` | Manage room membership |
+
+### Roles
+
+| Command | Description |
+|---------|-------------|
 | `meshterm roles` | List roles |
-| `meshterm role create <name>` | Create a role with `--agents`, `--priority`, `--fallback` |
-| **Server** | |
+| `meshterm role create <name>` | Create a role (`--agents`, `--priority`, `--fallback`) |
+
+### Server
+
+| Command | Description |
+|---------|-------------|
 | `meshterm server start` | Start the mesh server (`--port`, `--secret`, `--store`) |
-| **Client** | |
-| `meshterm client start` | Start tmux inject client (foreground, `--agent`, `--session`) |
-| `meshterm daemon start` | Start background daemon (`--agent`, `--session`) |
-| `meshterm daemon stop` | Stop the daemon |
-| `meshterm daemon status` | Show daemon status |
-| **Tools** | |
-| `meshterm tui` | Launch terminal dashboard |
-| `meshterm mcp` | Start MCP server (stdio) |
-| **Agent Lifecycle** | |
-| `meshterm agent start` | Start agent: creates tmux session + CLI + mesh-client (`--name`, `--cli`, `--session`) |
-| `meshterm agent stop` | Stop agent cleanly (`--name`, `--kill-session`) |
-| `meshterm agent list` | Show running agents with status |
+
+### Advanced / Low-Level
+
+These are building blocks used by `setup` and `agent start`. You typically don't need them directly.
+
+| Command | Description | When to use |
+|---------|-------------|-------------|
+| `meshterm daemon start` | Start background message injection daemon | Already have a tmux session, just need message push |
+| `meshterm daemon stop/status` | Manage the daemon | Debugging daemon issues |
+| `meshterm client start` | Foreground daemon (blocks terminal) | Debugging message injection |
+| `meshterm mcp` | Start MCP server (stdio) | Custom MCP integration, not using `setup` |
+| `meshterm tui` | Launch terminal dashboard | Visual overview of agents, messages, rooms |
 
 ## API Reference
 
