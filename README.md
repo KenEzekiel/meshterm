@@ -203,8 +203,8 @@ Configure webhooks on the server via a config file or environment variable. mesh
 |--------|---------|----------|
 | `raw` | `{from_agent, to_agent, body, created_at, id}` | Generic webhooks, custom integrations |
 | `openclaw` | `{text: "[meshterm] Message from ...", mode: "now"}` | OpenClaw gateway |
-| `slack` | `{text: "*[meshterm]* Message from \`agent\`:\nmessage"}` | Slack incoming webhooks |
-| `discord` | `{content: "**[meshterm]** Message from \`agent\`:\nmessage"}` | Discord webhooks |
+| `slack` | `{text: "*[meshterm]* Message from agent: ..."}` | Slack incoming webhooks |
+| `discord` | `{content: "**[meshterm]** Message from agent: ..."}` | Discord webhooks |
 | `custom` | User-defined template with `{{from}}`, `{{to}}`, `{{body}}`, `{{timestamp}}` | Anything else |
 
 **Environment variable** (backward compatible, defaults to `openclaw` format):
