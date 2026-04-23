@@ -606,7 +606,7 @@ switch (command) {
       if (args.store) env.MESH_STORE = args.store;
       console.log(`🕸️  Starting mesh server on :${args.port ?? env.MESH_PORT ?? "4200"}...`);
       const serverPath = join(import.meta.dir, "../server/server.ts");
-      const proc = spawn("bun", ["run", serverPath], {
+      const proc = spawn(process.execPath, ["run", serverPath], {
         stdio: "inherit",
         env,
       });
@@ -698,7 +698,7 @@ switch (command) {
     }
 
     const tuiPath = join(import.meta.dir, "../tui/index.ts");
-    const proc = spawn("bun", ["run", tuiPath], {
+    const proc = spawn(process.execPath, ["run", tuiPath], {
       stdio: "inherit",
       env: process.env,
     });
@@ -714,7 +714,7 @@ switch (command) {
     }
 
     const mcpPath = join(import.meta.dir, "../mcp/index.ts");
-    const proc = spawn("bun", ["run", mcpPath], {
+    const proc = spawn(process.execPath, ["run", mcpPath], {
       stdio: "inherit",
       env: process.env,
     });

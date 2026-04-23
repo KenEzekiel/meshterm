@@ -29,7 +29,7 @@ meshterm history [limit]
 curl -s -X POST $MESH_URL/messages \
   -H "content-type: application/json" \
   -H "x-mesh-secret: $MESH_SECRET" \
-  -d '{"from_agent":"kaze","to_agent":"kiro-mac","body":"your task here"}'
+  -d '{"from_agent":"$MESH_AGENT","to_agent":"<target-agent>","body":"your task here"}'
 ```
 
 ## Environment Variables
@@ -38,7 +38,7 @@ curl -s -X POST $MESH_URL/messages \
 |----------|---------|-------------|
 | `MESH_SECRET` | (required) | Shared secret for mesh authentication |
 | `MESH_URL` | `http://localhost:4200` | Mesh server URL |
-| `MESH_AGENT` | `kaze` | Agent name to identify as |
+| `MESH_AGENT` | (from config) | Agent name to identify as |
 
 ## Webhook Setup
 

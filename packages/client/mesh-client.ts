@@ -10,7 +10,7 @@ import { parseArgs } from "util";
 
 const { values: args } = parseArgs({
   options: {
-    agent: { type: "string", default: "kiro-mac" },
+    agent: { type: "string", default: "" },
     session: { type: "string", default: "kiro" },
     mesh: { type: "string", default: "http://localhost:4200" },
     secret: { type: "string", default: process.env.MESH_SECRET ?? "" },

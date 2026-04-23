@@ -6,7 +6,7 @@ set -e
 
 MESH_URL="${MESH_URL:-http://localhost:4200}"
 MESH_SECRET="${MESH_SECRET:-mesh-dev-secret}"
-MESH_AGENT="${MESH_AGENT:-kaze}"
+MESH_AGENT="${MESH_AGENT:-${1:?Usage: setup.sh <agent-name>}}"
 
 echo "🕸️  meshterm skill setup"
 echo "   Server: $MESH_URL"

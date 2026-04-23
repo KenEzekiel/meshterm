@@ -92,7 +92,7 @@ switch (subcommand) {
     // 3. Start mesh-client in background
     const meshClientPath = join(import.meta.dir, "../client/mesh-client.ts");
     const proc = Bun.spawn([
-      "bun", meshClientPath,
+      process.execPath, meshClientPath,
       "--agent", name,
       "--session", session,
       "--mesh", mesh,
