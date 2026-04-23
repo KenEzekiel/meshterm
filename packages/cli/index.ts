@@ -248,7 +248,8 @@ if (args.help || (!command && positionals.length === 0)) {
 }
 
 if (args.version) {
-  console.log("meshterm v0.7.0");
+  const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf-8"));
+  console.log(`meshterm v${pkg.version}`);
   process.exit(0);
 }
 
