@@ -1,5 +1,9 @@
 # meshterm
 
+[![npm version](https://img.shields.io/npm/v/meshterm.svg)](https://www.npmjs.com/package/meshterm)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![CI](https://github.com/KenEzekiel/meshterm/actions/workflows/ci.yml/badge.svg)](https://github.com/KenEzekiel/meshterm/actions/workflows/ci.yml)
+
 Agent-agnostic communication layer for AI agents. If it has a terminal prompt, it's on the mesh. Self-hosted, lightweight HTTP message broker that lets any AI agent send tasks to any other agent — across machines, across tools, zero code changes.
 
 > **Example:** You have Claude Code on your laptop and Kiro on your VPS. You want Claude to ask Kiro to deploy code. meshterm makes that possible — no code changes to either agent.
