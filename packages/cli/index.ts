@@ -893,6 +893,23 @@ If you don't reply, the sender never sees your response.
     break;
   }
 
+  case "agent": {
+    const agentArgs = rest; // everything after "agent"
+    
+    if (agentArgs.length === 0) {
+      console.log(`Usage:
+  meshterm agent start --name <name> --cli <command> --session <tmux-session> [--mesh <url>] [--secret <secret>]
+  meshterm agent stop --name <name> [--kill-session]
+  meshterm agent list`);
+      break;
+    }
+
+    const [agentSub, ...agentRest] = agentArgs;
+    const { runAgent } = await import("../agent/index.ts");
+    await runAgent(agentSub, agentRest);
+    break;
+  }
+
   default:
     console.log(`meshterm v0.7.0 — Agent-agnostic communication layer for AI agents
 
@@ -932,6 +949,11 @@ CLIENT
 TOOLS
   tui                                     Launch terminal dashboard
   mcp                                     Start MCP server (stdio, for AI agents)
+
+AGENT LIFECYCLE
+  agent start --name <n> --cli <cmd> --session <tmux>   Start agent (tmux + CLI + mesh-client)
+  agent stop --name <n> [--kill-session]                 Stop agent cleanly
+  agent list                                             Show running agents with status
 
 FLAGS
   --help, -h                              Show this help

@@ -55,7 +55,11 @@ function tmuxSessionExists(session: string): boolean {
 const [subcommand] = process.argv.slice(2);
 const rawArgs = process.argv.slice(3);
 
-switch (subcommand) {
+export async function runAgent(sub?: string, args?: string[]) {
+  const cmd = sub ?? subcommand;
+  const cmdArgs = args ?? rawArgs;
+
+  switch (cmd) {
   case "start": {
     const { values: opts } = parseArgs({
       args: rawArgs,
@@ -200,8 +204,14 @@ switch (subcommand) {
   }
 
   default:
-    console.log("Usage: meshterm-agent.ts <start|stop|list>");
+    console.log("Usage: meshterm agent <start|stop|list>");
     console.log("  start  --name <name> --cli <command> --session <session> [--mesh <url>] [--secret <secret>]");
     console.log("  stop   --name <name> [--kill-session]");
     console.log("  list");
+  }
+}
+
+// Run directly if this is the entry point
+if (import.meta.main) {
+  runAgent();
 }
