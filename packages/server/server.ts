@@ -150,8 +150,11 @@ interface Message {
   from_agent: string;
   to_agent: string;
   body: string;
+  source?: string; // "room:<name>" if from a room message
   created_at: string;
   read: boolean;
+  state: "queued" | "fetched";
+  fetched_at?: string;
 }
 
 interface Agent {
@@ -320,6 +323,27 @@ Bun.serve({
       return json([...agents.values()]);
     }
 
+    // POST /agents/heartbeat { name }
+    if (method === "POST" && path === "/agents/heartbeat") {
+      const body = await req.json();
+      if (!body.name) {
+        return json({ error: "missing name" }, 400);
+      }
+      const agent = agents.get(body.name);
+      if (agent) {
+        agent.last_seen = new Date().toISOString();
+      } else {
+        // Auto-register on first heartbeat
+        agents.set(body.name, {
+          name: body.name,
+          type: body.type ?? "unknown",
+          host: body.host ?? "unknown",
+          last_seen: new Date().toISOString(),
+        });
+      }
+      return json({ ok: true });
+    }
+
     // --- Roles ---
 
     // POST /roles { name, capabilities, agents, priority, fallback }
@@ -386,6 +410,7 @@ Bun.serve({
               body: body.body,
               created_at: new Date().toISOString(),
               read: false,
+              state: "queued",
             };
             messages.push(msg);
             fireWebhook(msg.to_agent, msg);
@@ -423,6 +448,7 @@ Bun.serve({
           body: body.body,
           created_at: new Date().toISOString(),
           read: false,
+          state: "queued",
         };
         messages.push(msg);
         fireWebhook(msg.to_agent, msg);
@@ -452,6 +478,7 @@ Bun.serve({
         body: body.body,
         created_at: new Date().toISOString(),
         read: false,
+        state: "queued",
       };
       messages.push(msg);
       fireWebhook(msg.to_agent, msg);
@@ -463,7 +490,13 @@ Bun.serve({
       const sender = agents.get(body.from_agent);
       if (sender) sender.last_seen = new Date().toISOString();
       persist();
-      return json({ ok: true, message: msg });
+      const recipient = agents.get(body.to_agent);
+      return json({ 
+        ok: true, 
+        message: msg,
+        recipient_exists: !!recipient,
+        recipient_last_seen: recipient?.last_seen ?? null,
+      });
     }
 
     // GET /messages/:agent?unread=true&limit=50
@@ -492,6 +525,16 @@ Bun.serve({
       let result = messages.filter((m) => m.to_agent === agent);
       if (unreadOnly) result = result.filter((m) => !m.read);
       result = result.slice(-limit);
+      
+      // Mark fetched messages
+      const now = new Date().toISOString();
+      for (const m of result) {
+        if (m.state === "queued") {
+          m.state = "fetched";
+          m.fetched_at = now;
+        }
+      }
+      
       return json(result);
     }
 
@@ -503,6 +546,23 @@ Bun.serve({
       if (!msg) return json({ error: "not found" }, 404);
       msg.read = true;
       return json({ ok: true });
+    }
+
+    // GET /messages/:id/status
+    const statusMatch = path.match(/^\/messages\/([^/]+)\/status$/);
+    if (method === "GET" && statusMatch) {
+      const id = statusMatch[1];
+      const msg = messages.find((m) => m.id === id);
+      if (!msg) return json({ error: "not found" }, 404);
+      return json({
+        id: msg.id,
+        state: msg.state ?? "queued",
+        read: msg.read,
+        created_at: msg.created_at,
+        fetched_at: msg.fetched_at ?? null,
+        from_agent: msg.from_agent,
+        to_agent: msg.to_agent,
+      });
     }
 
     // GET /messages/:agent/history?limit=50
@@ -652,8 +712,10 @@ Bun.serve({
           from_agent: body.from_agent,
           to_agent: member,
           body: `[room:${name}] ${body.body}`,
+          source: `room:${name}`,
           created_at: new Date().toISOString(),
           read: false,
+          state: "queued",
         };
         messages.push(directMsg);
       }

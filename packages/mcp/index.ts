@@ -558,6 +558,18 @@ async function main() {
     console.error(`[MCP] Warning: Failed to register agent: ${err.message}`);
   }
 
+  // Heartbeat every 30s to keep presence accurate
+  setInterval(async () => {
+    try {
+      await meshFetch("/agents/heartbeat", config, {
+        method: "POST",
+        body: JSON.stringify({ name: config.agent }),
+      });
+    } catch {
+      // Silent — heartbeat failure is not fatal
+    }
+  }, 30_000);
+
   // Read stdin line by line
   const rl = createInterface({
     input: process.stdin,
