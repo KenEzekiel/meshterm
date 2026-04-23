@@ -695,6 +695,27 @@ Bun.serve({
         return json({ error: "agent not a member of this room" }, 400);
       }
       
+      // Enforce room mode
+      if (room.mode === "moderated") {
+        // Only moderator can post, or agents explicitly granted turn
+        if (body.from_agent !== room.moderator && !body.granted) {
+          return json({ error: "moderated room: only the moderator can post, or use {granted: true} when called on" }, 403);
+        }
+      } else if (room.mode === "round-robin") {
+        // Enforce turn order based on members list
+        const lastMsg = roomMessages.filter(m => m.room === name).slice(-1)[0];
+        if (lastMsg) {
+          const lastIdx = room.members.indexOf(lastMsg.from_agent);
+          const expectedIdx = (lastIdx + 1) % room.members.length;
+          const expectedAgent = room.members[expectedIdx];
+          if (body.from_agent !== expectedAgent) {
+            return json({ error: `round-robin: it's ${expectedAgent}'s turn` }, 403);
+          }
+        }
+        // First message: anyone can start
+      }
+      // reactive + free-form: no restrictions
+      
       const msg: RoomMessage = {
         id: genId(),
         room: name,
