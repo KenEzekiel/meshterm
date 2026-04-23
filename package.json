@@ -1,11 +1,17 @@
 {
   "name": "meshterm",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Agent-agnostic communication layer for AI agents",
   "type": "module",
   "bin": {
     "meshterm": "./packages/cli/index.ts"
   },
+  "files": [
+    "packages/",
+    "skills/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "server": "bun run packages/server/server.ts",
     "client": "bun run packages/client/mesh-client.ts",

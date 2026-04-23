@@ -9,21 +9,25 @@ services:
       - "127.0.0.1:4200:4200"
     volumes:
       - mesh-data:/data
+      # Optional: mount a config file for webhooks
+      # - ./mesh-config.json:/app/mesh-config.json:ro
     environment:
       - MESH_SECRET=${MESH_SECRET:-mesh-dev-secret}
       - MESH_PORT=4200
       - MESH_STORE=/data/mesh-store.json
       - MESH_WEBHOOKS=${MESH_WEBHOOKS:-}
-    networks:
-      - default
-      - npm_default
-      - openclaw_default
 
 volumes:
   mesh-data:
 
-networks:
-  npm_default:
-    external: true
-  openclaw_default:
-    external: true
+# To connect to external networks (e.g., nginx proxy manager),
+# create a docker-compose.override.yml:
+#
+#   services:
+#     mesh-server:
+#       networks:
+#         - default
+#         - npm_default
+#   networks:
+#     npm_default:
+#       external: true

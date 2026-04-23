@@ -4,6 +4,8 @@ node_modules/
 .env
 .env.local
 mesh-store.json
+mesh-config.json
+docker-compose.override.yml
 dist/
 build/
 *.tsbuildinfo
