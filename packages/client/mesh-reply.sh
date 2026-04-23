@@ -4,7 +4,7 @@
 # Example: mesh-reply.sh kaze "done, files changed: src/auth.ts"
 
 MESH_URL="${MESH_URL:-https://mesh.kennezekiel.tech}"
-MESH_SECRET="${MESH_SECRET:-ce903448bc087d1ea2edebbae4abf6b4}"
+MESH_SECRET="${MESH_SECRET:-your-secret-here}"
 MESH_AGENT="${MESH_AGENT:-kiro-mac}"
 
 TO="${1:?Usage: mesh-reply.sh <to_agent> <message>}"
