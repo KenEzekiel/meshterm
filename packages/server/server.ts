@@ -6,21 +6,127 @@
  */
 
 import { readFileSync, writeFileSync, existsSync } from "fs";
+import { join } from "path";
 
 const PORT = Number(process.env.MESH_PORT ?? 4200);
 const SECRET = process.env.MESH_SECRET ?? "mesh-dev-secret";
 const STORE_PATH = process.env.MESH_STORE ?? "./mesh-store.json";
+const CONFIG_PATH = process.env.MESH_CONFIG ?? "";
 const MAX_MESSAGES = 1000; // keep last N messages in memory
 
-// Webhook config: when a message arrives for a specific agent, POST to a webhook
-// Format: MESH_WEBHOOKS=agent:url:token,agent2:url2:token2
-const WEBHOOKS: Map<string, { url: string; token: string }> = new Map();
+// --- Webhook Adapter Pattern ---
+
+interface WebhookConfig {
+  url: string;
+  token: string;
+  format: "raw" | "openclaw" | "slack" | "discord" | "custom";
+  template?: string; // for custom format — uses {{from}}, {{to}}, {{body}}, {{timestamp}}
+  headers?: Record<string, string>; // extra headers
+}
+
+interface ServerConfig {
+  webhooks?: Record<string, WebhookConfig>;
+}
+
+// Webhook adapters — transform a message into the format each service expects
+const webhookAdapters: Record<string, (msg: Message, hook: WebhookConfig) => { headers: Record<string, string>; body: string }> = {
+  raw: (msg, hook) => ({
+    headers: {
+      "Content-Type": "application/json",
+      ...(hook.token ? { "Authorization": `Bearer ${hook.token}` } : {}),
+      ...hook.headers,
+    },
+    body: JSON.stringify({
+      from_agent: msg.from_agent,
+      to_agent: msg.to_agent,
+      body: msg.body,
+      created_at: msg.created_at,
+      id: msg.id,
+    }),
+  }),
+  openclaw: (msg, hook) => ({
+    headers: {
+      "Content-Type": "application/json",
+      ...(hook.token ? { "Authorization": `Bearer ${hook.token}` } : {}),
+      ...hook.headers,
+    },
+    body: JSON.stringify({
+      text: `[meshterm] Message from ${msg.from_agent}: ${msg.body}`,
+      mode: "now",
+    }),
+  }),
+  slack: (msg, hook) => ({
+    headers: {
+      "Content-Type": "application/json",
+      ...hook.headers,
+    },
+    body: JSON.stringify({
+      text: `*[meshterm]* Message from \`${msg.from_agent}\`:\n${msg.body}`,
+    }),
+  }),
+  discord: (msg, hook) => ({
+    headers: {
+      "Content-Type": "application/json",
+      ...hook.headers,
+    },
+    body: JSON.stringify({
+      content: `**[meshterm]** Message from \`${msg.from_agent}\`:\n${msg.body}`,
+    }),
+  }),
+  custom: (msg, hook) => {
+    const template = hook.template ?? "{{body}}";
+    const rendered = template
+      .replace(/\{\{from\}\}/g, msg.from_agent)
+      .replace(/\{\{to\}\}/g, msg.to_agent)
+      .replace(/\{\{body\}\}/g, msg.body)
+      .replace(/\{\{timestamp\}\}/g, msg.created_at)
+      .replace(/\{\{id\}\}/g, msg.id);
+    return {
+      headers: {
+        "Content-Type": "application/json",
+        ...(hook.token ? { "Authorization": `Bearer ${hook.token}` } : {}),
+        ...hook.headers,
+      },
+      body: rendered,
+    };
+  },
+};
+
+// Load webhooks from config file and/or env
+const WEBHOOKS: Map<string, WebhookConfig> = new Map();
+
+// 1. Load from config file (preferred)
+function loadServerConfig(): ServerConfig {
+  // Try explicit config path
+  if (CONFIG_PATH && existsSync(CONFIG_PATH)) {
+    try {
+      return JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
+    } catch { /* fall through */ }
+  }
+  // Try mesh-config.json in current directory
+  if (existsSync("./mesh-config.json")) {
+    try {
+      return JSON.parse(readFileSync("./mesh-config.json", "utf-8"));
+    } catch { /* fall through */ }
+  }
+  return {};
+}
+
+const serverConfig = loadServerConfig();
+if (serverConfig.webhooks) {
+  for (const [agent, config] of Object.entries(serverConfig.webhooks)) {
+    WEBHOOKS.set(agent, { format: "raw", ...config });
+    console.log(`Webhook registered: ${agent} → ${config.url} (${config.format ?? "raw"})`);
+  }
+}
+
+// 2. Load from env (backward compatible, defaults to openclaw format)
 if (process.env.MESH_WEBHOOKS) {
   for (const entry of process.env.MESH_WEBHOOKS.split(",")) {
     const [agent, url, token] = entry.split("|");
-    if (agent && url && token) {
-      WEBHOOKS.set(agent, { url, token });
-      console.log(`Webhook registered: ${agent} → ${url}`);
+    if (agent && url && token && !WEBHOOKS.has(agent)) {
+      WEBHOOKS.set(agent, { url, token, format: "openclaw" });
+      console.log(`Webhook registered (env): ${agent} → ${url} (openclaw)`);
     }
   }
 }
@@ -28,18 +134,10 @@ if (process.env.MESH_WEBHOOKS) {
 async function fireWebhook(agent: string, msg: Message) {
   const hook = WEBHOOKS.get(agent);
   if (!hook) return;
+  const adapter = webhookAdapters[hook.format] ?? webhookAdapters.raw;
+  const { headers, body } = adapter(msg, hook);
   try {
-    await fetch(hook.url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${hook.token}`,
-      },
-      body: JSON.stringify({
-        text: `[meshterm] Message from ${msg.from_agent}: ${msg.body}`,
-        mode: "now",
-      }),
-    });
+    await fetch(hook.url, { method: "POST", headers, body });
   } catch (err: any) {
     console.error(`Webhook failed for ${agent}: ${err.message}`);
   }
