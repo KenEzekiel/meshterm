@@ -218,6 +218,9 @@ const { values: args, positionals } = parseArgs({
     server: { type: "string" },
     key: { type: "string" },
     agent: { type: "string" },
+    port: { type: "string" },
+    secret: { type: "string" },
+    store: { type: "string" },
     session: { type: "string" },
     poll: { type: "string", default: "5000" },
     type: { type: "string", default: "unknown" },
@@ -245,7 +248,7 @@ if (args.help || (!command && positionals.length === 0)) {
 }
 
 if (args.version) {
-  console.log("meshterm v0.2.0");
+  console.log("meshterm v0.6.4");
   process.exit(0);
 }
 
@@ -597,15 +600,19 @@ switch (command) {
   case "server": {
     const [subcommand] = rest;
     if (subcommand === "start") {
-      console.log("🕸️  Starting mesh server...");
+      const env = { ...process.env };
+      if (args.port) env.MESH_PORT = args.port;
+      if (args.secret) env.MESH_SECRET = args.secret;
+      if (args.store) env.MESH_STORE = args.store;
+      console.log(`🕸️  Starting mesh server on :${args.port ?? env.MESH_PORT ?? "4200"}...`);
       const serverPath = join(import.meta.dir, "../server/server.ts");
       const proc = spawn("bun", ["run", serverPath], {
         stdio: "inherit",
-        env: process.env,
+        env,
       });
       proc.on("exit", (code) => process.exit(code ?? 0));
     } else {
-      console.log("Usage: meshterm server start");
+      console.log("Usage: meshterm server start [--port 4200] [--secret <key>] [--store ./data.json]");
     }
     break;
   }
@@ -886,57 +893,56 @@ If you don't reply, the sender never sees your response.
   }
 
   default:
-    console.log(`meshterm — Agent-agnostic communication layer
+    console.log(`meshterm v0.6.4 — Agent-agnostic communication layer for AI agents
 
-Commands:
+SETUP
   init                                    Configure meshterm (server URL, API key, agent name)
-  setup <agent-type> [--session <tmux>]   Auto-configure an AI agent to use meshterm
-                                          Supported: kiro, claude, cursor, copilot, gemini
-                                          Optionally starts daemon with --session flag
-  send <to> <message> [--broadcast]       Send a message to another agent or role
+  setup <agent> [--session <tmux>]        Auto-configure an AI agent (kiro/claude/cursor/copilot/gemini)
+
+MESSAGING
+  send <to> <message> [--broadcast]       Send a message to an agent or role:xxx
   poll                                    Check for unread messages
   agents                                  List registered agents
-  roles                                   List all roles
-  role create <name> --agents a,b,c       Create a new role
-    [--priority a,b,c]                    Agent priority order (default: same as agents)
-    [--fallback queue|reject]             Fallback when no agents online (default: queue)
-    [--capabilities x,y,z]                Role capabilities (optional)
-  room create <name> --members a,b,c      Create a new room
-    --mode <mode>                         Room mode: free-form, round-robin, reactive, moderated
-    [--moderator <agent>]                 Moderator (required for moderated mode)
+  status                                  Show mesh health overview
+
+ROOMS
+  room create <name> --members a,b,c      Create a room (--mode free-form|round-robin|reactive|moderated)
   room list                               List all rooms
-  room send <name> <message>              Send message to room
+  room send <name> <message>              Send message to a room
   room history <name> [--limit 50]        View room message history
   room join <name>                        Join a room
   room leave <name>                       Leave a room
   room close <name>                       Close/delete a room
-  daemon start --agent <name> --session <tmux>  Start background daemon (auto-injects messages)
-  daemon stop                             Stop the daemon
-  daemon status                           Show daemon status (PID, uptime, session)
-  status                                  Show mesh status (agents, messages, health)
-  tui                                     Launch terminal dashboard
-  mcp                                     Start MCP server (stdio transport for AI assistants)
-  server start                            Start the mesh server
-  client start --agent <name> --session <tmux>  Start the tmux inject client (foreground)
 
-Examples:
+ROLES
+  roles                                   List all roles
+  role create <name> --agents a,b,c       Create a role (--priority, --fallback, --capabilities)
+
+SERVER
+  server start [--port 4200] [--secret <key>] [--store ./data.json]
+                                          Start the mesh server
+
+CLIENT
+  client start --agent <name> --session <tmux>   Start tmux inject client (foreground)
+  daemon start --agent <name> --session <tmux>   Start background daemon
+  daemon stop                             Stop the daemon
+  daemon status                           Show daemon status
+
+TOOLS
+  tui                                     Launch terminal dashboard
+  mcp                                     Start MCP server (stdio, for AI agents)
+
+FLAGS
+  --help, -h                              Show this help
+  --version, -v                           Show version
+
+EXAMPLES
   meshterm init --server https://mesh.example.com --key sk_xxx --agent my-agent
+  meshterm server start --port 4200 --secret my-secret
   meshterm setup kiro --session kiro
-  meshterm setup claude
-  meshterm daemon start --agent kiro-mac --session kiro
-  meshterm daemon status
-  meshterm daemon stop
   meshterm send agent-1 "refactor auth module"
-  meshterm send role:coder "review auth module"
-  meshterm send role:coder --broadcast "system update in 5 min"
-  meshterm role create coder --agents agent-1,agent-2 --priority agent-1,agent-2 --fallback queue
-  meshterm room create planning --members agent-1,agent-2,agent-3 --mode free-form
-  meshterm room send planning "Let's discuss the auth refactor"
-  meshterm room history planning
-  meshterm roles
+  meshterm send role:coder --broadcast "pull latest"
+  meshterm room create planning --members a,b,c --mode free-form
   meshterm poll
-  meshterm tui
-  meshterm mcp
-  meshterm client start --agent agent-1 --session my-tmux
 `);
 }

@@ -1,6 +1,6 @@
 # meshterm
 
-Agent-agnostic communication layer for AI agents. If it has a terminal prompt, it's on the mesh.
+Agent-agnostic communication layer for AI agents. If it has a terminal prompt, it's on the mesh. Self-hosted, lightweight HTTP message broker that lets any AI agent send tasks to any other agent — across machines, across tools, zero code changes.
 
 ```
 ┌──────────────┐                          ┌──────────────┐
@@ -44,77 +44,62 @@ Every agent can **send** messages — just call the API (via MCP tool, CLI, or H
 - OpenClaw agents get messages pushed via webhook
 - Any agent can always poll the REST API directly
 
-## The Problem
-
-You run multiple AI agents across multiple machines. They can't talk to each other. You copy-paste between them. You're the bottleneck.
-
-## The Solution
-
-meshterm is a lightweight, self-hosted message broker that lets any AI agent send tasks to any other agent. Zero code changes to the agent.
-
-## Getting Started
+## Quick Start
 
 ### Prerequisites
 
 - [Bun](https://bun.sh) runtime
 - [tmux](https://github.com/tmux/tmux) (for receiving messages — `brew install tmux` on macOS, `apt install tmux` on Linux)
 
-### Step 1: Install meshterm
+### 1. Install
 
 ```bash
 npm install -g meshterm
 ```
 
-### Step 2: Deploy the server
-
-Pick one:
+### 2. Start the server
 
 ```bash
-# Option A: Docker (recommended)
-git clone https://github.com/KenEzekiel/meshterm.git
-cd meshterm/docker
-echo "MESH_SECRET=$(openssl rand -hex 16)" > .env
-docker compose up -d
-
-# Option B: Bare
-MESH_SECRET=your-secret meshterm server start
+meshterm server start --port 4200 --secret your-secret
 ```
 
-The server runs on port 4200. For remote access, put it behind a reverse proxy with SSL (nginx, Caddy, etc.).
-
-### Step 3: Configure your machine
+Or with environment variables:
 
 ```bash
-meshterm init --server https://your-server.com --key your-secret --agent my-agent
+MESH_PORT=4200 MESH_SECRET=your-secret meshterm server start
+```
+
+### 3. Configure your machine
+
+```bash
+meshterm init --server http://localhost:4200 --key your-secret --agent my-agent
 ```
 
 This creates `~/.meshterm/config.json`. Run this on every machine that connects to the mesh.
 
-### Step 4: Connect your AI agent
+### 4. Send your first message
 
 ```bash
-# Auto-configure (recommended)
-meshterm setup kiro --session my-tmux-session
-# Also supports: claude, cursor, copilot, gemini
-
-# This does three things:
-# 1. Writes MCP config so the agent gets mesh tools
-# 2. Writes a steering/skill file so the agent understands mesh messages
-# 3. Starts the daemon to push incoming messages to the agent
+meshterm send my-agent "hello from the mesh"
+meshterm poll
 ```
 
-Or configure manually:
+That's it. Your agents can now talk to each other.
+
+## Connect Your Agents
+
+### MCP agents (Kiro, Claude, Cursor, Copilot, Gemini)
+
+One command auto-configures MCP config, steering/skill files, and the daemon:
 
 ```bash
-# Start your agent in tmux
-tmux new-session -d -s agent
-tmux send-keys -t agent "your-agent-cli" Enter
+meshterm setup kiro --session my-tmux-session
+# Also supports: claude, cursor, copilot, gemini
+```
 
-# Start the daemon (background, pushes messages to tmux)
-meshterm daemon start --agent my-agent --session agent
+Or configure manually — add to your agent's MCP config (`~/.kiro/settings/mcp.json`, `~/.claude/mcp.json`, etc.):
 
-# Add MCP config to your agent (path varies by agent)
-# ~/.kiro/settings/mcp.json, ~/.claude/mcp.json, etc.
+```json
 {
   "mcpServers": {
     "meshterm": {
@@ -125,35 +110,37 @@ meshterm daemon start --agent my-agent --session agent
 }
 ```
 
-### Step 5: Send your first message
+### tmux agents (daemon push)
+
+For any TUI agent running in tmux:
 
 ```bash
-meshterm send my-agent "hello from the mesh"
-meshterm poll
+# Start your agent in tmux
+tmux new-session -d -s agent
+tmux send-keys -t agent "your-agent-cli" Enter
+
+# Start the daemon (background, pushes messages to tmux)
+meshterm daemon start --agent my-agent --session agent
 ```
 
-That's it. Your agents can now talk to each other.
+### OpenClaw (webhook push)
 
-## Capabilities
+Configure webhooks on the server via environment variable:
 
-### Three Integration Paths
+```bash
+MESH_WEBHOOKS="openclaw|https://your-openclaw-url/webhook|your-token" meshterm server start
+```
 
-| Path | How it works | Best for |
-|------|-------------|----------|
-| **MCP server** | Local stdio server, agent discovers tools automatically | Claude Code, Kiro, Cursor, Copilot, Gemini |
-| **Daemon + tmux** | Background process injects messages into tmux sessions | Any TUI agent, agents without MCP |
-| **Direct HTTP** | Call the REST API directly | API-native agents, scripts, OpenClaw |
+## Communication Modes
 
-### Two Communication Modes
-
-**Messages (Orchestrational)** — 1:1 task delegation between agents.
+### Messages — 1:1 task delegation
 
 ```bash
 meshterm send agent-1 "refactor the auth module"
 meshterm poll  # check for replies
 ```
 
-**Rooms (Discussional)** — multi-agent conversation spaces.
+### Rooms — multi-agent conversations
 
 ```bash
 meshterm room create planning --members agent-1,agent-2,agent-3 --mode free-form
@@ -165,19 +152,15 @@ Room modes: `free-form` (anyone speaks), `round-robin` (take turns), `reactive` 
 
 ### Role-Based Routing
 
-Route messages to the best available agent by role instead of by name.
+Route messages to the best available agent by role instead of by name:
 
 ```bash
-# Create a role
 meshterm role create coder \
   --agents agent-1,agent-2 \
   --priority agent-1,agent-2 \
   --fallback queue
 
-# Send to role (routes to best available agent)
 meshterm send role:coder "fix the login bug"
-
-# Broadcast to all agents in a role
 meshterm send role:coder --broadcast "pull latest and rebuild"
 ```
 
@@ -186,39 +169,7 @@ Routing logic:
 2. Pick the highest-priority online agent
 3. If none online: `queue` (deliver when one comes online) or `reject` (return error)
 
-### Daemon (Background Push)
-
-The daemon runs in the background and pushes incoming messages into your agent's tmux session. No separate terminal needed.
-
-```bash
-meshterm daemon start --agent my-agent --session my-tmux
-meshterm daemon status   # check if running
-meshterm daemon stop     # stop it
-```
-
-- PID file: `~/.meshterm/daemon.pid`
-- Log file: `~/.meshterm/daemon.log`
-- Survives terminal close
-- Auto-started by `meshterm setup`
-
-### Auto-Setup
-
-One command to configure any supported agent:
-
-```bash
-meshterm setup kiro     # Kiro CLI
-meshterm setup claude   # Claude Code
-meshterm setup cursor   # Cursor
-meshterm setup copilot  # GitHub Copilot
-meshterm setup gemini   # Gemini CLI
-```
-
-What it does:
-- Writes MCP config to the agent's config path
-- Writes a steering/skill file (for agents that support it)
-- Starts the daemon with `--session` flag
-
-### MCP Tools
+## MCP Tools
 
 When connected via MCP, agents get these tools automatically:
 
@@ -237,57 +188,39 @@ When connected via MCP, agents get these tools automatically:
 | `mesh_room_join` | Join a room |
 | `mesh_room_leave` | Leave a room |
 
-### TUI Dashboard
-
-Live terminal dashboard showing agents, messages, and mesh status.
-
-```bash
-meshterm tui
-```
-
-- Agents panel with online/offline status
-- Messages panel with recent activity
-- Status bar with totals
-- Auto-refresh every 3s
-- Keyboard: `q` quit, `r` refresh, `tab` switch panels
-
-### Agent Skills
-
-Skill files teach agents how to handle mesh messages. Included for:
-
-- `skills/kiro/SKILL.md` — Kiro CLI
-- `skills/claude/SKILL.md` — Claude Code
-- `skills/openclaw/SKILL.md` — OpenClaw
-
-These are auto-installed by `meshterm setup`. For other agents, copy the relevant skill file to your agent's skill/steering directory.
-
 ## CLI Reference
 
 | Command | Description |
 |---------|-------------|
+| **Setup** | |
 | `meshterm init` | Configure server URL, API key, agent name |
 | `meshterm setup <agent>` | Auto-configure an AI agent (kiro/claude/cursor/copilot/gemini) |
-| `meshterm send <to> <message>` | Send message (direct or `role:xxx`) |
-| `meshterm send <to> --broadcast <msg>` | Broadcast to all agents in role |
+| **Messaging** | |
+| `meshterm send <to> <message>` | Send message (direct or `role:xxx`, `--broadcast` for roles) |
 | `meshterm poll` | Check for unread messages |
 | `meshterm agents` | List registered agents |
 | `meshterm status` | Show mesh health and overview |
-| `meshterm roles` | List roles |
-| `meshterm role create <name>` | Create a role with `--agents`, `--priority`, `--fallback` |
+| **Rooms** | |
 | `meshterm room create <name>` | Create a room with `--members`, `--mode` |
 | `meshterm room list` | List rooms |
 | `meshterm room send <name> <msg>` | Send to room |
-| `meshterm room history <name>` | View room messages |
+| `meshterm room history <name>` | View room messages (`--limit`) |
 | `meshterm room join <name>` | Join a room |
 | `meshterm room leave <name>` | Leave a room |
 | `meshterm room close <name>` | Delete a room |
-| `meshterm daemon start` | Start background daemon with `--agent`, `--session` |
+| **Roles** | |
+| `meshterm roles` | List roles |
+| `meshterm role create <name>` | Create a role with `--agents`, `--priority`, `--fallback` |
+| **Server** | |
+| `meshterm server start` | Start the mesh server (`--port`, `--secret`, `--store`) |
+| **Client** | |
+| `meshterm client start` | Start tmux inject client (foreground, `--agent`, `--session`) |
+| `meshterm daemon start` | Start background daemon (`--agent`, `--session`) |
 | `meshterm daemon stop` | Stop the daemon |
 | `meshterm daemon status` | Show daemon status |
-| `meshterm tui` | Launch TUI dashboard |
+| **Tools** | |
+| `meshterm tui` | Launch terminal dashboard |
 | `meshterm mcp` | Start MCP server (stdio) |
-| `meshterm server start` | Start the mesh server |
-| `meshterm client start` | Start tmux inject client (foreground) |
 
 ## API Reference
 
@@ -331,6 +264,21 @@ All endpoints (except `/health`) require `x-mesh-secret` header.
 | POST | `/rooms/:name/messages` | Send `{from_agent, body}` |
 | GET | `/rooms/:name/messages?limit=50` | Room history |
 
+## Self-Hosting with Docker
+
+If you prefer Docker over running the server directly:
+
+```bash
+git clone https://github.com/KenEzekiel/meshterm.git
+cd meshterm/docker
+echo "MESH_SECRET=$(openssl rand -hex 16)" > .env
+docker compose up -d
+```
+
+Port 4200, localhost only by default. For remote access, expose via reverse proxy with SSL.
+
+The Docker container connects to the `npm_default` network if available (for nginx proxy manager integration).
+
 ## How It Works
 
 ```
@@ -362,19 +310,6 @@ Sender                    Server                    Receiver
 
 The pipe is dumb. The agent is smart. meshterm just moves bytes between them.
 
-## Docker
-
-```bash
-git clone https://github.com/KenEzekiel/meshterm.git
-cd meshterm/docker
-echo "MESH_SECRET=$(openssl rand -hex 16)" > .env
-docker compose up -d
-```
-
-Port 4200, localhost only by default. For remote access, expose via reverse proxy with SSL.
-
-The Docker container connects to the `npm_default` network if available (for nginx proxy manager integration).
-
 ## Networking
 
 meshterm is just HTTP — the only question is "can your machines reach the server?"
@@ -383,8 +318,7 @@ meshterm is just HTTP — the only question is "can your machines reach the serv
 
 ```bash
 # Machine A (server)
-meshterm server start
-# Find your local IP: ifconfig | grep 192
+meshterm server start --secret your-secret
 
 # Machine B (agent)
 meshterm init --server http://192.168.x.x:4200 --key your-secret --agent my-agent
@@ -396,22 +330,15 @@ meshterm setup kiro --session kiro
 **Option 1: Tailscale (recommended, free)**
 ```bash
 # Install Tailscale on both machines
-# Machine A starts server
-meshterm server start
-
-# Machine B connects via Tailscale IP
-meshterm init --server http://100.x.x.x:4200 --key your-secret --agent my-agent
+meshterm server start --secret your-secret        # Machine A
+meshterm init --server http://100.x.x.x:4200 ...  # Machine B
 ```
 
 **Option 2: ngrok (quick tunnel)**
 ```bash
-# Machine A
-meshterm server start
-ngrok http 4200
-# → https://abc123.ngrok.io
-
-# Machine B
-meshterm init --server https://abc123.ngrok.io --key your-secret --agent my-agent
+meshterm server start --secret your-secret  # Machine A
+ngrok http 4200                              # → https://abc123.ngrok.io
+meshterm init --server https://abc123.ngrok.io ...  # Machine B
 ```
 
 **Option 3: VPS (always online)**
