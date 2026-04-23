@@ -1,286 +1,239 @@
-# meshterm — Messaging & Agent Identity Design Doc (v2)
+# meshterm — Messaging & Agent Identity Design Doc (v3 — Final)
 
 ## Design Principle
 
-**The pipe stays dumb.** meshterm is a message broker, not an orchestrator. Intelligence belongs in the agents, not the server. Every feature must pass this test: "Does this make the server smarter, or does it give agents better information to make their own decisions?"
+**The pipe stays dumb.** meshterm is a message broker, not an orchestrator. Intelligence belongs in the agents and clients, not the server. Every feature must pass: "Does this make the server smarter, or does it give clients better information?"
 
 ---
 
 ## Problem Statement
 
-5 fundamental gaps, ordered by impact:
-
-1. **No delivery feedback** — sender gets `{ok: true}` but never knows if the message was received, read, or lost
+1. **No delivery feedback** — sender gets `{ok: true}` but never knows if the message was received
 2. **No agent presence** — server can't distinguish alive/dead/idle agents
 3. **Identity collision** — multiple instances register as the same name, compete for messages
-4. **Room model is half-baked** — rooms duplicate messages as direct messages, no clear use case distinction from direct messaging
-5. **No cleanup** — stale agents, orphaned processes, dead messages accumulate forever
+4. **Room model needs refinement** — room messages duplicate as direct messages with no way to distinguish them
+5. **No cleanup** — stale agents, orphaned processes, dead messages accumulate
 
 ---
 
-## Current Architecture (for reference)
+## Decisions Made
 
-```
-SEND paths (all work):
-  MCP tool (mesh_send)  → POST /messages → server stores
-  CLI (meshterm send)   → POST /messages → server stores
-  HTTP (curl)           → POST /messages → server stores
-
-RECEIVE paths (heterogeneous):
-  Daemon (mesh-client)  → GET /messages/:agent (5s poll) → tmux send-keys    [PUSH, reliable]
-  Webhook               → server POST to URL on new message                   [PUSH, reliable]
-  MCP (mesh_poll)       → agent calls tool when it wants                      [PULL, unreliable]
-  CLI (meshterm poll)   → human runs command                                  [PULL, manual]
-```
-
-Key insight: **sending is uniform, receiving is fragmented.** The problems are all on the receive side.
+| Topic | Decision | Rationale |
+|-------|----------|-----------|
+| `mesh_ack` | **Dropped.** `fetched` is the terminal server-side state. | Ack requires every agent to comply via steering. If they don't, data is misleading. "Fetched" is honest — the gap between fetched and processed is an agent behavior problem, not a messaging problem. Revisit if a concrete scenario demands it. |
+| Room modes | **Keep all 4** (free-form, round-robin, reactive, moderated). | Use case: simulated company board (CEO/CSO/CPO gstack agents). Modes are the product differentiator for multi-agent collaboration. Need testing, not removal. |
+| Multi-instance | **Option B: roles.** No server changes. | `meshterm setup` auto-creates a role for the base agent name and registers with a unique name. Keeps the pipe dumb. Server doesn't need to understand sessions. |
+| Room duplication | **Keep duplication, add `source` field.** | Stopping duplication breaks daemon receive for rooms. Adding `source: "room:name"` lets agents deduplicate programmatically. No breaking change. |
+| Bounce-back | **Client-side timeout**, not server-side. | `mesh_send --timeout 5m` polls message status and warns if not fetched. Server stays dumb — just stores messages and tracks state. |
 
 ---
 
 ## Phase 1: Message States + Heartbeat
 
-### What we add
+### Server changes
 
-**Message states** (server tracks automatically):
+**Message state tracking:**
 ```
 queued   → stored, nobody fetched it yet
 fetched  → a client retrieved it (daemon poll, MCP poll, CLI poll)
-read     → agent explicitly acknowledged (new: mesh_ack)
 ```
 
-No "delivered" state — "fetched" is honest. Fetched by daemon ≠ processed by agent.
-No auto-expiry — messages don't disappear. If you want expiry, that's a future opt-in feature.
+- Add `state` field to Message: default `"queued"`, set to `"fetched"` when returned by `GET /messages/:agent`
+- Add `fetched_at` timestamp
+- Existing `read` field (from `PATCH /messages/:id/read`) stays — it's the agent's explicit mark
 
-**Agent heartbeat:**
+**New endpoints:**
 ```
-POST /agents/heartbeat {name}  → updates last_seen, lightweight
+POST /agents/heartbeat {name}           → updates last_seen (lightweight, no body needed)
+GET  /messages/:id/status               → {state, created_at, fetched_at, read_at}
 ```
 
-MCP server sends heartbeat every 30s in background thread. Daemon already updates last_seen on every poll. Webhook agents update on every webhook response.
-
-**Sender feedback** (informational only, server doesn't act on it):
+**Enhanced send response:**
 ```
 POST /messages response:
 {
   ok: true,
   message: {...},
-  recipient_last_seen: "2026-04-23T10:00:00Z",  // or null if never registered
+  recipient_last_seen: "2026-04-23T10:00:00Z",  // null if never registered
   recipient_exists: true
 }
 ```
 
-**Message status check:**
+`recipient_last_seen` is informational only. The server does NOT use it for routing.
+
+### Client changes
+
+**MCP server:** Add background heartbeat — `POST /agents/heartbeat` every 30s. Cheap, keeps presence accurate for MCP agents that rarely poll.
+
+**No steering changes needed** — no `mesh_ack`, no new agent behavior required.
+
+### Tradeoffs
+
+| Decision | Alternative | Why this way |
+|----------|-------------|-------------|
+| No auto-expiry on messages | TTL with auto-delete | Auto-expiry silently loses messages. Worse than no expiry. Add opt-in TTL later if needed. |
+| `fetched` not `delivered` | Call it "delivered" | Daemon fetching ≠ agent processing. Honest naming prevents false confidence. |
+| Heartbeat from MCP server | Rely on last_seen from polls | MCP agents rarely poll. Without heartbeat, they always look offline. 30s heartbeat is one tiny POST. |
+| `recipient_last_seen` is informational | Use for routing | Point-in-time snapshot. Agent could die 1s later. Useful for display, dangerous for logic. |
+
+---
+
+## Phase 2: Multi-Instance via Roles
+
+### How it works
+
+No server changes. Uses existing role system.
+
+**`meshterm setup kiro --session kiro` now does:**
+1. Generates unique agent name: `kiro-mac-<session-name>` (e.g., `kiro-mac-cli`, `kiro-mac-ide-fdb`)
+2. Registers with the mesh server under that name
+3. Creates role `kiro-mac` if it doesn't exist (with `fallback: queue`)
+4. Adds the new agent to the role
+5. On `meshterm agent stop`, removes agent from role
+
+**Addressing:**
 ```
-GET /messages/:id/status → { state: "queued"|"fetched"|"read", created_at, fetched_at, read_at }
+meshterm send kiro-mac "task"              → role routing: picks highest-priority online agent
+meshterm send kiro-mac-cli "task"          → direct: specific agent
+meshterm send role:kiro-mac --broadcast    → all agents in role
 ```
 
-**New MCP tool: `mesh_ack`**
+Kaze sends to `kiro-mac` (the role) by default. Server routes to the best available agent — which should be the daemon-connected CLI (most reliable receiver, highest priority in the role).
+
+### Why not session targeting?
+
+Session targeting (`kiro-mac/session-123`) makes the server smart and can target non-receiver agents. If kaze sends to an MCP-only IDE session that never polls, the message is lost. With roles, the server routes to the agent with the best receive mechanism (daemon > webhook > MCP poll).
+
+### Tradeoffs
+
+| Decision | Alternative | Why this way |
+|----------|-------------|-------------|
+| Roles (existing feature) | Server-side session groups | Zero server changes. Roles already handle priority + fallback. |
+| Auto-create role on setup | Manual role management | Nobody will manually create roles. Auto-create removes friction. |
+| Daemon agent = highest priority | Equal priority | Daemon has reliable push receive. MCP agents are best-effort poll. Route to the reliable one. |
+
+---
+
+## Phase 3: Room Refinement
+
+### Room message `source` field
+
+When a room message creates direct message copies, add a `source` field:
+
+```json
+{
+  "id": "msg-123",
+  "from_agent": "ceo-agent",
+  "to_agent": "cso-agent",
+  "body": "[room:board-meeting] Let's discuss the security audit",
+  "source": "room:board-meeting",
+  "created_at": "..."
+}
 ```
-mesh_ack(message_id) → marks message as read, confirms to sender
+
+Agents can filter: `source` present = room message, `source` absent = direct task.
+
+### Room modes — use cases
+
+| Mode | Behavior | Use case |
+|------|----------|----------|
+| **free-form** | Anyone speaks anytime | Brainstorming, casual discussion |
+| **round-robin** | Agents take turns in order | Structured board meeting, each agent gives input |
+| **moderated** | Moderator agent controls who speaks | CEO runs the meeting, calls on agents |
+| **reactive** | Agents speak only when they have relevant input | Async review, agents chime in when their domain is relevant |
+
+These modes need testing. The server enforces them (rejects out-of-turn messages in round-robin, only moderator can "call on" agents in moderated). The agents need steering to understand the mode they're in.
+
+### Room membership with roles
+
+When a role is a room member, any agent in the role can send to the room. The room stores the role name as the member, not individual agents. This solves the multi-instance room membership problem.
+
+```
+Room "board-meeting" members: ["ceo", "cso", "cpo", "kiro-mac"]
+                                                      ↑ this is a role
+Any kiro-mac-cli or kiro-mac-ide can send to the room via the role.
+```
+
+### Webhook for room messages
+
+Add room message webhook support. When a room message is posted, fire webhooks for members that have webhooks configured. Currently only direct messages trigger webhooks — room messages should too.
+
+### Tradeoffs
+
+| Decision | Alternative | Why this way |
+|----------|-------------|-------------|
+| Keep duplication + `source` field | Stop duplication, add room polling to daemon | No breaking change. Daemon still receives room messages. Agents can deduplicate via `source`. |
+| Keep all 4 room modes | Remove unused modes | CEO/CSO/CPO board use case needs round-robin and moderated. Test them, don't remove them. |
+| Role-based room membership | Per-agent membership | Per-agent breaks with multi-instance. Role-based is future-proof. |
+| Room webhooks | No room webhooks | Kaze (OpenClaw) needs to receive room messages. Without webhooks, kaze misses room conversations. |
+
+---
+
+## Phase 4: Client-Side Timeout + Cleanup
+
+### Send with timeout (client-side)
+
+```bash
+meshterm send kiro-mac "deploy canopy" --timeout 5m
+```
+
+The CLI sends the message, then polls `GET /messages/:id/status` periodically. If not fetched within timeout:
+```
+⚠️ Message to kiro-mac not fetched after 5m. Recipient last seen 2h ago.
+```
+
+For MCP, `mesh_send` gets an optional `timeout` parameter:
+```
+mesh_send(to: "kiro-mac", message: "deploy", timeout: "5m")
+→ returns: {sent: true, fetched: false, warning: "not fetched after 5m"}
+```
+
+Default: no timeout (fire-and-forget, current behavior).
+
+### Cleanup
+
+**Server-side (automatic, periodic):**
+- Agents with no heartbeat for 24h: mark as `expired` (visible but excluded from role routing)
+- Messages in `read` state older than 7d: delete
+- Messages in any state older than 30d: delete
+- Never auto-delete agents — only mark expired. Re-activates on next heartbeat.
+
+**Client-side (manual):**
+```
+meshterm agent cleanup                  # kill orphaned local MCP/daemon processes
+meshterm agent deregister <name>        # remove agent from server
+meshterm messages cleanup [--older 7d]  # purge old read messages
+meshterm role cleanup <role>            # remove expired agents from role
 ```
 
 ### Tradeoffs
 
 | Decision | Alternative | Why this way |
 |----------|-------------|-------------|
-| No auto-expiry | TTL with bounce-back | Auto-expiry silently loses messages. Worse than no expiry. If we add it later, make it opt-in per message with explicit bounce notification. |
-| `fetched` not `delivered` | Call it "delivered" | "Delivered" implies the agent got it. Daemon fetching ≠ agent processing. Honest naming prevents false confidence. |
-| Heartbeat from MCP server | Rely on last_seen from polls | MCP agents rarely poll. Without heartbeat, they always look offline. 30s heartbeat is cheap (1 tiny POST). |
-| `recipient_last_seen` is informational | Use it for routing decisions | Point-in-time snapshot. Agent could die 1s later. Useful for humans ("is this agent alive?"), dangerous for routing logic. |
-| `mesh_ack` is explicit | Auto-ack on fetch | Auto-ack means "daemon fetched it" = "agent read it", which is false. Explicit ack means the agent actually processed the message. |
-
-### Steering/setup changes needed
-
-- MCP server: add background heartbeat (30s interval)
-- `mesh_ack` tool added to MCP tool list
-- Agent steering files (kiro, claude, openclaw): add instruction to call `mesh_ack` after processing a mesh message
-- `meshterm setup` command: update generated steering to include ack pattern
-
----
-
-## Phase 2: Multi-Instance Handling
-
-### The real problem
-
-Multiple Kiro sessions register as `kiro-mac`. When kaze sends to `kiro-mac`:
-- Daemon fetches it first (5s poll) → injects into tmux CLI session
-- MCP sessions never see it (daemon already marked it fetched)
-- Or: no daemon running → whichever MCP session polls first gets it, others don't
-
-### Design constraint: keep the pipe dumb
-
-Session targeting (send to `kiro-mac/session-123`) makes the server smart. The server would need to understand sessions, route between them, track which is "best." That's orchestrator logic.
-
-**Instead: the server stays flat, the client handles multiplexing.**
-
-### Option A: Daemon as the single receiver, fan-out locally
-
-```
-All messages for kiro-mac → daemon fetches → daemon decides where to inject
-
-Daemon knows about local sessions:
-  - tmux session "kiro" → inject via send-keys
-  - tmux session "kiro-fdb" → inject via send-keys
-  - IDE sessions → can't inject (no mechanism)
-```
-
-**Tradeoff:** Simple server, but IDE sessions are second-class citizens. Daemon becomes a local router, which is complexity in the client instead of the server. IDE agents must poll to receive.
-
-### Option B: Multiple agent names, role for grouping
-
-```
-Register as separate agents:
-  kiro-mac-cli    (daemon receives)
-  kiro-mac-ide-1  (MCP poll receives)
-  kiro-mac-ide-2  (MCP poll receives)
-
-Create a role:
-  meshterm role create kiro-mac --agents kiro-mac-cli,kiro-mac-ide-1,kiro-mac-ide-2
-
-Kaze sends to:
-  role:kiro-mac → routes to highest-priority online agent (kiro-mac-cli preferred)
-  kiro-mac-cli  → specific agent
-  role:kiro-mac --broadcast → all of them
-```
-
-**Tradeoff:** Uses existing features (roles). No server changes. But requires manual role management — every time a new session starts, it needs to register and join the role. Stale sessions accumulate in the role.
-
-### Option C: Server-side session groups (new concept)
-
-```
-POST /agents/register { name: "kiro-mac", group: "kiro-mac" }
-
-Server auto-groups agents with same group name.
-Messages to "kiro-mac" → delivered to ALL agents in the group (broadcast by default)
-  OR → delivered to the one with latest heartbeat (latest-wins)
-```
-
-**Tradeoff:** Server gets slightly smarter (group concept), but it's a thin layer — just "same name = same group." The routing decision (broadcast vs latest-wins) is still configured by the client at registration time.
-
-### Recommendation: Option B (roles) for now, Option C later
-
-Option B works today with zero server changes. The `meshterm setup` command can auto-create the role and register with a unique name. When we have enough usage data to know the right default behavior (broadcast vs latest-wins), implement Option C.
-
-**Concrete steps for Option B:**
-1. `meshterm setup kiro --session kiro` generates a unique agent name: `kiro-mac-<session-name>`
-2. Auto-creates role `kiro-mac` if it doesn't exist
-3. Adds the new agent to the role
-4. On `meshterm agent stop`, removes from role
-
-### What about session targeting to non-receiver agents?
-
-This is why we DON'T do session targeting. If kaze sends to `kiro-mac-ide-2` and that IDE session never polls, the message is lost. With roles, kaze sends to `role:kiro-mac` and the server routes to the highest-priority online agent — which should be the daemon-connected CLI (most reliable receiver).
-
----
-
-## Rooms: Scrutiny & Refined Use Cases
-
-### Current implementation problems
-
-1. **Room messages create duplicate direct messages** — every room message generates N-1 direct messages (one per member). This means:
-   - Messages appear twice for daemon agents (room history + direct inbox)
-   - Unread count is inflated
-   - `mesh_poll` returns room messages mixed with direct messages
-   - No way to distinguish "this is a room message" from "this is a direct task"
-
-2. **Room membership is by agent name** — with identity collision, `kiro-mac` is a member but which instance? The room bug we hit earlier (can't send, already a member) is likely caused by this.
-
-3. **Room modes (round-robin, reactive, moderated) are implemented but untested** — no evidence anyone has used anything other than free-form.
-
-4. **No clear use case distinction from direct messaging** — when should kaze use a room vs direct messages?
-
-### Refined use cases
-
-| Use case | Direct message | Room |
-|----------|---------------|------|
-| Delegate a task to one agent | ✅ `meshterm send kiro-vps "deploy canopy"` | ❌ Overkill |
-| Broadcast to all agents | ✅ `role:kiro-mac --broadcast` | ❌ Rooms are for conversation, not broadcast |
-| Multi-agent discussion (design review, planning) | ❌ No shared context | ✅ All agents see the full thread |
-| Audit trail of a collaborative task | ❌ Messages scattered across agents | ✅ Room history is the single source of truth |
-| Standup / status check | ❌ Would need to poll each agent | ✅ Room where each agent posts status |
-
-**Rooms are for conversations. Direct messages are for tasks.** This distinction should be documented.
-
-### Room fixes needed
-
-1. **Stop duplicating room messages as direct messages.** Instead:
-   - Daemon should poll room messages separately: `GET /rooms/:name/messages?since=<timestamp>`
-   - MCP should have `mesh_room_poll` tool (or `mesh_poll` returns both direct + room messages with a `source` field)
-   - Webhook should fire for room messages too (with `source: "room:name"`)
-
-2. **Room membership should work with roles.** If `kiro-mac` is a role with 3 sessions, the role is the room member, not individual sessions. Any session in the role can send to the room.
-
-3. **Remove unused room modes** (round-robin, reactive, moderated) until there's a real use case. Keep free-form only. Less code, less bugs.
-
-### Tradeoffs
-
-| Decision | Alternative | Why |
-|----------|-------------|-----|
-| Stop room→direct duplication | Keep duplication with `source` field | Duplication is a hack. It inflates message counts, confuses agents, and creates ordering issues. Clean separation is worth the daemon change. |
-| Rooms use roles for membership | Keep per-agent membership | Per-agent membership breaks with multi-instance. Role-based membership is future-proof. But it adds a dependency on roles being set up correctly. |
-| Remove unused room modes | Keep them | Dead code is a liability. No one has tested round-robin/reactive/moderated. Remove and re-add when there's a real use case. |
-
----
-
-## Phase 3: Bounce-Back for Stale Messages
-
-If a message is `queued` (not fetched) for a configurable duration and the recipient has no recent heartbeat:
-- Server creates a bounce message to the sender: `[meshterm] Message to <agent> not fetched after <duration>. Recipient last seen <timestamp>.`
-- Original message stays queued (not deleted) — recipient can still fetch it later
-- Bounce is informational, not an error
-
-**Default: no bounce.** Opt-in per message: `{ttl_warn: "1h"}` means bounce after 1 hour.
-
-### Tradeoff
-
-| Decision | Alternative | Why |
-|----------|-------------|-----|
-| Bounce is informational, message stays | Delete message on bounce | Deleting loses the message. The recipient might come back. Bounce just tells the sender "heads up, this hasn't been picked up." |
-| Opt-in, not default | Default bounce after 1h | Most messages are fire-and-forget. Default bounce would spam senders with notifications for every message to an offline agent. |
-
----
-
-## Phase 4: Cleanup
-
-**Server-side (automatic):**
-- Agents with no heartbeat for 24h: mark as `expired` in agent list (still visible, excluded from role routing)
-- Messages older than 7 days and in `read` state: delete
-- Messages older than 30 days regardless of state: delete
-- Never auto-delete agents — only mark expired. Agent re-activates on next heartbeat.
-
-**Client-side (manual):**
-- `meshterm agent cleanup` — find and kill orphaned MCP/daemon processes on local machine
-- `meshterm agent deregister <name>` — remove agent from server
-- `meshterm messages cleanup` — purge read messages older than N days
-
-### Tradeoff
-
-| Decision | Alternative | Why |
-|----------|-------------|-----|
-| Never auto-delete agents | Auto-delete after 7d | Agent might be offline for a week (vacation, VPS reboot). Deleting loses room memberships, role assignments. Marking expired is reversible. |
-| Delete read messages after 7d | Keep forever | Storage grows unbounded. Read messages have no value after a week. 7d gives enough time for debugging. |
-| Client-side process cleanup | Server-side | Server can't kill local processes. This is fundamentally a local concern. |
+| Client-side timeout | Server-side bounce | Server stays dumb. Client decides if it cares about delivery confirmation. |
+| Fire-and-forget default | Always wait for delivery | Most messages are tasks — sender moves on. Timeout is opt-in for critical messages. |
+| Never auto-delete agents | Auto-delete after 7d | Agent might be offline for a week. Deleting loses room memberships, role assignments. Marking expired is reversible. |
+| 30d hard delete on messages | Keep forever | Storage grows unbounded. 30d is generous. Read messages have no value after that. |
 
 ---
 
 ## Implementation Order
 
-| Phase | Server changes | Client changes | Effort |
-|-------|---------------|----------------|--------|
-| **1: Message states + heartbeat** | Add `state` field, heartbeat endpoint, message status endpoint | MCP: add heartbeat thread + `mesh_ack` tool. Steering: update ack instructions. | Medium |
-| **2: Multi-instance (roles)** | None | `meshterm setup` generates unique name + auto-creates role. `meshterm agent stop` removes from role. | Small |
-| **Room fixes** | Remove room→direct duplication. Add room webhook. | Daemon: poll rooms separately. MCP: add room source to poll. Remove unused room modes. | Medium |
-| **3: Bounce-back** | Check queued messages on interval, create bounce messages | None | Small |
-| **4: Cleanup** | Mark expired agents, delete old messages on interval | `meshterm agent cleanup`, `meshterm agent deregister` | Small |
+| Phase | Server changes | Client changes | Effort | Depends on |
+|-------|---------------|----------------|--------|------------|
+| **1** | `state` + `fetched_at` on messages, heartbeat endpoint, message status endpoint, enhanced send response | MCP heartbeat thread (30s) | Medium | Nothing |
+| **2** | None | `meshterm setup` generates unique name + auto-creates role. `meshterm agent stop` removes from role. | Small | Phase 1 (heartbeat for presence) |
+| **3** | `source` field on room→direct copies, room webhooks, role-based room membership | Daemon/MCP: filter by `source`. Test room modes. | Medium | Phase 2 (roles for room membership) |
+| **4** | Periodic cleanup (expired agents, old messages) | `meshterm agent cleanup`, `meshterm role cleanup`, `mesh_send --timeout` | Small | Phase 1 (message states) |
 
 ---
 
 ## Open Questions
 
-1. **Should `mesh_poll` return room messages too?** Currently rooms are separate. Merging them simplifies the agent experience but mixes task messages with conversation messages.
+1. **`mesh_poll` and room messages:** Should `mesh_poll` return room messages (with `source` field) or should rooms be polled separately via `mesh_room_history`? Merging simplifies agent experience but mixes tasks with conversations.
 
-2. **Role auto-management:** If `meshterm setup` auto-creates roles, who cleans up stale role members? The role could accumulate dead agents. Need a `meshterm role cleanup` or auto-prune on heartbeat check.
+2. **Role auto-cleanup:** If `meshterm setup` auto-creates roles, stale agents accumulate. `meshterm role cleanup` prunes expired agents, but who runs it? Should the server auto-prune on heartbeat check?
 
-3. **Webhook for rooms:** Should the server fire webhooks for room messages? Currently only direct messages trigger webhooks. If kaze is in a room, it won't get webhook-pushed for room messages.
+3. **Room mode enforcement:** How strict? If an agent sends out-of-turn in round-robin, reject the message or queue it? Rejecting is simpler but the agent might not understand why its message failed.
 
-4. **Per-agent API keys:** Currently one shared secret. With multi-instance, any agent can impersonate another. Per-agent keys would prevent this but add key management complexity. Defer until there's a real security need (multi-user, not just multi-agent).
+4. **Per-agent API keys:** Deferred. Current shared secret is fine for single-user multi-agent. Revisit when multi-user is a real scenario.
