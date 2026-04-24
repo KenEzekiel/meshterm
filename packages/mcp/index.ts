@@ -117,6 +117,20 @@ const TOOLS = [
     },
   },
   {
+    name: "mesh_read",
+    description: "Read the full content of a message by its ID",
+    inputSchema: {
+      type: "object",
+      properties: {
+        message_id: {
+          type: "string",
+          description: "The message ID to read (from mesh_poll output)",
+        },
+      },
+      required: ["message_id"],
+    },
+  },
+  {
     name: "mesh_agents",
     description: "List all registered agents on the mesh",
     inputSchema: {
@@ -294,11 +308,31 @@ async function handleToolCall(name: string, args: any, config: Config): Promise<
         const dir = m.from_agent === config.agent ? "→" : "←";
         const other = m.from_agent === config.agent ? m.to_agent : m.from_agent;
         const status = isUnread ? "🆕" : m.read ? "✓" : "·";
-        const state = m.state ? ` [${m.state}]` : "";
-        return `${status} ${dir} ${other}: ${m.body.slice(0, 300)}${m.body.length > 300 ? "..." : ""}`;
+        const preview = m.body.slice(0, 150) + (m.body.length > 150 ? "..." : "");
+        return `${status} [${m.id}] ${dir} ${other}: ${preview}`;
       }).join("\n");
       
-      return `${unread.length > 0 ? `📨 ${unread.length} new message(s)\n\n` : ""}Recent messages:\n${formatted}`;
+      return `${unread.length > 0 ? `📨 ${unread.length} new message(s)\n\n` : ""}Recent messages (use mesh_read to see full message):\n${formatted}`;
+    }
+
+    case "mesh_read": {
+      const { message_id } = args;
+      if (!message_id) throw new Error("Missing required parameter: message_id");
+      
+      const status = await meshFetch(`/messages/${message_id}/status`, config);
+      
+      // Get the full message from history
+      const history = await meshFetch(`/messages/${config.agent}/history?limit=100`, config);
+      const msg = history.find((m: any) => m.id === message_id);
+      
+      if (!msg) {
+        return `Message ${message_id} not found in your history`;
+      }
+
+      const dir = msg.from_agent === config.agent ? "Sent to" : "From";
+      const other = msg.from_agent === config.agent ? msg.to_agent : msg.from_agent;
+      
+      return `📩 Message ${msg.id}\n${dir}: ${other}\nTime: ${msg.created_at}\nState: ${status.state}${status.read ? " (read)" : ""}\n${msg.source ? `Source: ${msg.source}\n` : ""}\n${msg.body}`;
     }
 
     case "mesh_agents": {
