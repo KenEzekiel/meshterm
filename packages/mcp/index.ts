@@ -319,8 +319,6 @@ async function handleToolCall(name: string, args: any, config: Config): Promise<
       const { message_id } = args;
       if (!message_id) throw new Error("Missing required parameter: message_id");
       
-      const status = await meshFetch(`/messages/${message_id}/status`, config);
-      
       // Get the full message from history
       const history = await meshFetch(`/messages/${config.agent}/history?limit=100`, config);
       const msg = history.find((m: any) => m.id === message_id);
@@ -331,8 +329,9 @@ async function handleToolCall(name: string, args: any, config: Config): Promise<
 
       const dir = msg.from_agent === config.agent ? "Sent to" : "From";
       const other = msg.from_agent === config.agent ? msg.to_agent : msg.from_agent;
+      const state = msg.state ?? (msg.read ? "read" : "fetched");
       
-      return `📩 Message ${msg.id}\n${dir}: ${other}\nTime: ${msg.created_at}\nState: ${status.state}${status.read ? " (read)" : ""}\n${msg.source ? `Source: ${msg.source}\n` : ""}\n${msg.body}`;
+      return `📩 Message ${msg.id}\n${dir}: ${other}\nTime: ${msg.created_at}\nState: ${state}${msg.read ? " (read)" : ""}\n${msg.source ? `Source: ${msg.source}\n` : ""}\n${msg.body}`;
     }
 
     case "mesh_agents": {
