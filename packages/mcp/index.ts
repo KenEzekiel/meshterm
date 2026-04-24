@@ -295,7 +295,7 @@ async function handleToolCall(name: string, args: any, config: Config): Promise<
         const other = m.from_agent === config.agent ? m.to_agent : m.from_agent;
         const status = isUnread ? "🆕" : m.read ? "✓" : "·";
         const state = m.state ? ` [${m.state}]` : "";
-        return `${status} ${dir} ${other}: ${m.body.slice(0, 120)}${m.body.length > 120 ? "..." : ""}`;
+        return `${status} ${dir} ${other}: ${m.body.slice(0, 300)}${m.body.length > 300 ? "..." : ""}`;
       }).join("\n");
       
       return `${unread.length > 0 ? `📨 ${unread.length} new message(s)\n\n` : ""}Recent messages:\n${formatted}`;
