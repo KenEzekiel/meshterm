@@ -276,21 +276,29 @@ async function handleToolCall(name: string, args: any, config: Config): Promise<
     }
 
     case "mesh_poll": {
-      const msgs = await meshFetch(`/messages/${config.agent}?unread=true`, config);
-      if (!msgs.length) {
-        return "📭 No unread messages";
-      }
+      const unread = await meshFetch(`/messages/${config.agent}?unread=true`, config);
+      const recent = await meshFetch(`/messages/${config.agent}/history?limit=10`, config);
       
-      // Mark all as read
-      for (const m of msgs) {
+      // Mark unread as read
+      for (const m of unread) {
         await meshFetch(`/messages/${m.id}/read`, config, { method: "PATCH" });
       }
 
-      const formatted = msgs.map((m: any) => 
-        `📨 From: ${m.from_agent}\n   Time: ${m.created_at}\n   Message: ${m.body}`
-      ).join("\n\n");
+      if (!recent.length) {
+        return "📭 No messages";
+      }
+
+      const unreadIds = new Set(unread.map((m: any) => m.id));
+      const formatted = recent.map((m: any) => {
+        const isUnread = unreadIds.has(m.id);
+        const dir = m.from_agent === config.agent ? "→" : "←";
+        const other = m.from_agent === config.agent ? m.to_agent : m.from_agent;
+        const status = isUnread ? "🆕" : m.read ? "✓" : "·";
+        const state = m.state ? ` [${m.state}]` : "";
+        return `${status} ${dir} ${other}: ${m.body.slice(0, 120)}${m.body.length > 120 ? "..." : ""}`;
+      }).join("\n");
       
-      return `${msgs.length} unread message(s):\n\n${formatted}`;
+      return `${unread.length > 0 ? `📨 ${unread.length} new message(s)\n\n` : ""}Recent messages:\n${formatted}`;
     }
 
     case "mesh_agents": {
