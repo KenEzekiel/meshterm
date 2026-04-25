@@ -215,10 +215,41 @@ export async function runAgent(sub?: string, args?: string[]) {
     break;
   }
 
+  case "attach": {
+    const { values: opts } = parseArgs({
+      args: cmdArgs,
+      options: {
+        name: { type: "string" },
+      },
+    });
+
+    if (!opts.name) {
+      console.error("Usage: meshterm agent attach --name <name>");
+      process.exit(1);
+    }
+
+    const state = loadState();
+    const entry = state[opts.name];
+    if (!entry) {
+      console.error(`Agent "${opts.name}" not found. Run: meshterm agent list`);
+      process.exit(1);
+    }
+
+    if (!tmuxSessionExists(entry.session)) {
+      console.error(`Tmux session "${entry.session}" not found.`);
+      process.exit(1);
+    }
+
+    // Replace this process with tmux attach
+    const result = spawnSync("tmux", ["attach", "-t", entry.session], { stdio: "inherit" });
+    process.exit(result.exitCode ?? 0);
+  }
+
   default:
-    console.log("Usage: meshterm agent <start|stop|list>");
-    console.log("  start  --name <name> --cli <command> --session <session> [--mesh <url>] [--secret <secret>]");
-    console.log("  stop   --name <name> [--kill-session]");
+    console.log("Usage: meshterm agent <start|stop|list|attach>");
+    console.log("  start   --name <name> --cli <command> --session <session> [--mesh <url>] [--secret <secret>]");
+    console.log("  stop    --name <name> [--kill-session]");
+    console.log("  attach  --name <name>");
     console.log("  list");
   }
 }

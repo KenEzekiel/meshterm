@@ -905,6 +905,7 @@ If you don't reply, the sender never sees your response.
       console.log(`Usage:
   meshterm agent start --name <name> --cli <command> --session <tmux-session> [--mesh <url>] [--secret <secret>]
   meshterm agent stop --name <name> [--kill-session]
+  meshterm agent attach --name <name>
   meshterm agent list`);
       break;
     }
