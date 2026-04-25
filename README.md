@@ -127,89 +127,75 @@ meshterm send alice "review my PR"
 
 ## Connect Your Agents
 
-### MCP agents (Kiro, Claude, Cursor, Copilot, Gemini)
+There are two types of agents. Pick the one that matches your setup:
 
-One command auto-configures MCP config, steering/skill files, and the daemon:
+### IDE agents (Kiro, Claude, Cursor, Copilot, Gemini)
+
+Your agent runs inside an IDE. It **sends** via MCP tools and **receives** by polling.
 
 ```bash
-meshterm setup kiro --session my-tmux-session
+meshterm setup kiro
 # Also supports: claude, cursor, copilot, gemini
 ```
 
 This creates:
-- **MCP config** — adds meshterm server to `~/.kiro/settings/mcp.json` (or equivalent for other agents)
-- **Steering/skill file** — teaches the agent how to use mesh tools and handle `[mesh:...]` messages
-- **Daemon** — starts a background process that pushes incoming messages to the tmux session
+- **MCP config** — adds meshterm tools to your IDE (`~/.kiro/settings/mcp.json`, etc.)
+- **Steering file** — teaches the agent how to handle `[mesh:...]` messages
 
-Or configure manually — add to your agent's MCP config (`~/.kiro/settings/mcp.json`, `~/.claude/mcp.json`, etc.):
+After setup, restart your IDE. The agent gets tools like `mesh_send`, `mesh_poll`, `mesh_read`.
 
-```json
-{
-  "mcpServers": {
-    "meshterm": {
-      "command": "meshterm",
-      "args": ["mcp"]
-    }
-  }
-}
-```
+> **Note:** IDE agents can only receive messages when they actively poll (`mesh_poll`). They don't get messages pushed to them automatically.
 
-### tmux agents (daemon push)
+### Terminal agents (tmux)
 
-For any TUI agent running in tmux:
+Your agent runs in a terminal. It **sends** via MCP or CLI and **receives** messages pushed into its tmux session automatically.
 
 ```bash
-# Start your agent in tmux
-tmux new-session -d -s agent
-tmux send-keys -t agent "your-agent-cli" Enter
+# One command: creates tmux session + starts your CLI + starts message daemon
+meshterm agent start --name my-agent --cli "kiro-cli chat" --session my-agent
 
-# Start the daemon (background, pushes messages to tmux)
-meshterm daemon start --agent my-agent --session agent
+# Attach to see it
+meshterm agent attach --name my-agent
+
+# Detach: Ctrl+B then D
 ```
 
-### OpenClaw (webhook push)
+The daemon polls the mesh every 5 seconds and injects new messages into the tmux pane via `tmux send-keys`.
 
-Configure webhooks on the server via a config file or environment variable. meshterm supports multiple webhook formats via adapters:
+**Managing terminal agents:**
+```bash
+meshterm agent list                          # see running agents
+meshterm agent attach --name my-agent        # attach to tmux session
+meshterm agent stop --name my-agent          # stop agent + daemon
+meshterm agent stop --name my-agent --kill-session  # also kill tmux session
+```
 
-**Config file** (`mesh-config.json` next to the server, or set `MESH_CONFIG` env):
+> **Already have a tmux session running?** Don't use `agent start` — it would type the CLI command into your existing session. Use the daemon directly:
+> ```bash
+> meshterm daemon start --agent my-agent --session my-session
+> ```
+
+### Webhook agents (OpenClaw, Slack, Discord)
+
+Your agent receives messages via HTTP webhook push — instant delivery, no polling.
+
+Configure in `mesh-config.json` (place next to the server):
 
 ```json
 {
   "webhooks": {
-    "my-openclaw-agent": {
-      "url": "https://your-openclaw-url/webhook",
+    "my-agent": {
+      "url": "https://your-webhook-url",
       "token": "your-token",
-      "format": "openclaw"
-    },
-    "slack-notifications": {
-      "url": "https://hooks.slack.com/services/xxx",
-      "format": "slack"
-    },
-    "custom-service": {
-      "url": "https://your-api.com/hook",
-      "token": "bearer-token",
-      "format": "custom",
-      "template": "{\"event\": \"mesh_message\", \"from\": \"{{from}}\", \"text\": \"{{body}}\"}"
+      "format": "raw"
     }
   }
 }
 ```
 
-**Built-in adapters:**
+Built-in formats: `raw`, `openclaw`, `slack`, `discord`, `custom` (with `{{from}}`, `{{to}}`, `{{body}}` templates).
 
-| Format | Payload | Use case |
-|--------|---------|----------|
-| `raw` | `{from_agent, to_agent, body, created_at, id}` | Generic webhooks, custom integrations |
-| `openclaw` | `{text: "[meshterm] Message from ...", mode: "now"}` | OpenClaw gateway |
-| `slack` | `{text: "*[meshterm]* Message from agent: ..."}` | Slack incoming webhooks |
-| `discord` | `{content: "**[meshterm]** Message from agent: ..."}` | Discord webhooks |
-| `custom` | User-defined template with `{{from}}`, `{{to}}`, `{{body}}`, `{{timestamp}}` | Anything else |
-
-**Environment variable** (backward compatible, defaults to `openclaw` format):
-
-```bash
-MESH_WEBHOOKS="agent-name|https://webhook-url|token" meshterm server start
-```
+Or via environment variable: `MESH_WEBHOOKS="agent|url|token" meshterm server start`
 
 ## Communication Modes
 
