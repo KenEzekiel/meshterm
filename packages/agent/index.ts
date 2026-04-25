@@ -97,13 +97,13 @@ export async function runAgent(sub?: string, args?: string[]) {
     if (!tmuxSessionExists(session)) {
       console.log(`Creating tmux session: ${session}`);
       spawnSync("tmux", ["new-session", "-d", "-s", session]);
-    } else {
-      console.log(`Tmux session exists: ${session}`);
-    }
 
-    // 2. Send CLI command into tmux
-    console.log(`Sending CLI command: ${cli}`);
-    spawnSync("tmux", ["send-keys", "-t", session, cli, "Enter"]);
+      // 2. Send CLI command into tmux (only for new sessions)
+      console.log(`Starting CLI: ${cli}`);
+      spawnSync("tmux", ["send-keys", "-t", session, cli, "Enter"]);
+    } else {
+      console.log(`Tmux session "${session}" already exists — skipping CLI launch (attach with: meshterm agent attach --name ${name})`);
+    }
 
     // 3. Start mesh-client in background
     const meshClientPath = join(import.meta.dir, "../client/mesh-client.ts");
