@@ -62,7 +62,7 @@ export async function runAgent(sub?: string, args?: string[]) {
   switch (cmd) {
   case "start": {
     const { values: opts } = parseArgs({
-      args: rawArgs,
+      args: cmdArgs,
       options: {
         name: { type: "string" },
         cli: { type: "string" },
@@ -144,7 +144,7 @@ export async function runAgent(sub?: string, args?: string[]) {
 
   case "stop": {
     const { values: opts } = parseArgs({
-      args: rawArgs,
+      args: cmdArgs,
       options: {
         name: { type: "string" },
         "kill-session": { type: "boolean", default: false },
