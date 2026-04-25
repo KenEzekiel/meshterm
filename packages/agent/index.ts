@@ -16,6 +16,18 @@ import { spawnSync } from "child_process";
 
 const STATE_DIR = process.env.MESHTERM_CONFIG_DIR ?? join(homedir(), ".meshterm");
 const STATE_FILE = join(STATE_DIR, "agents.json");
+const CONFIG_FILE = join(STATE_DIR, "config.json");
+
+// Load meshterm config for defaults
+function loadMeshConfig(): { server: string; secret: string; agent: string } | null {
+  try {
+    return JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+const meshConfig = loadMeshConfig();
 
 interface AgentEntry {
   name: string;
@@ -67,8 +79,8 @@ export async function runAgent(sub?: string, args?: string[]) {
         name: { type: "string" },
         cli: { type: "string" },
         session: { type: "string" },
-        mesh: { type: "string", default: "http://localhost:4200" },
-        secret: { type: "string", default: process.env.MESH_SECRET ?? "" },
+        mesh: { type: "string", default: meshConfig?.server ?? "http://localhost:4200" },
+        secret: { type: "string", default: meshConfig?.secret ?? process.env.MESH_SECRET ?? "" },
         type: { type: "string", default: "kiro" },
         host: { type: "string", default: "unknown" },
       },
