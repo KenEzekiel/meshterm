@@ -218,6 +218,8 @@ const { values: args, positionals } = parseArgs({
     server: { type: "string" },
     key: { type: "string" },
     agent: { type: "string" },
+    name: { type: "string" },
+    cli: { type: "string" },
     port: { type: "string" },
     secret: { type: "string" },
     store: { type: "string" },
@@ -228,6 +230,7 @@ const { values: args, positionals } = parseArgs({
     help: { type: "boolean", short: "h" },
     version: { type: "boolean", short: "v" },
     broadcast: { type: "boolean", default: false },
+    "kill-session": { type: "boolean", default: false },
     agents: { type: "string" },
     priority: { type: "string" },
     fallback: { type: "string", default: "queue" },
@@ -894,9 +897,11 @@ If you don't reply, the sender never sees your response.
   }
 
   case "agent": {
-    const agentArgs = rest; // everything after "agent"
+    // Pass raw args after "agent" to avoid CLI parseArgs consuming them
+    const agentIdx = process.argv.indexOf("agent");
+    const agentRawArgs = agentIdx >= 0 ? process.argv.slice(agentIdx + 1) : [];
     
-    if (agentArgs.length === 0) {
+    if (agentRawArgs.length === 0) {
       console.log(`Usage:
   meshterm agent start --name <name> --cli <command> --session <tmux-session> [--mesh <url>] [--secret <secret>]
   meshterm agent stop --name <name> [--kill-session]
@@ -904,7 +909,7 @@ If you don't reply, the sender never sees your response.
       break;
     }
 
-    const [agentSub, ...agentRest] = agentArgs;
+    const [agentSub, ...agentRest] = agentRawArgs;
     const { runAgent } = await import("../agent/index.ts");
     await runAgent(agentSub, agentRest);
     break;
