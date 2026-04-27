@@ -60,8 +60,17 @@ function isAlive(pid: number): boolean {
   }
 }
 
+// Resolve tmux path (compiled binaries may not have /opt/homebrew/bin in PATH)
+const TMUX = (() => {
+  for (const p of ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]) {
+    if (existsSync(p)) return p;
+  }
+  return "tmux"; // fallback to PATH
+})();
+
 function tmuxSessionExists(session: string): boolean {
-  return spawnSync("tmux", ["has-session", "-t", session]).exitCode === 0;
+  const result = spawnSync(TMUX, ["has-session", "-t", session]);
+  return result.status === 0;
 }
 
 const [subcommand] = process.argv.slice(2);
@@ -96,11 +105,11 @@ export async function runAgent(sub?: string, args?: string[]) {
     // 1. Create tmux session if not exists
     if (!tmuxSessionExists(session)) {
       console.log(`Creating tmux session: ${session}`);
-      spawnSync("tmux", ["new-session", "-d", "-s", session]);
+      spawnSync(TMUX, ["new-session", "-d", "-s", session]);
 
       // 2. Send CLI command into tmux (only for new sessions)
       console.log(`Starting CLI: ${cli}`);
-      spawnSync("tmux", ["send-keys", "-t", session, cli, "Enter"]);
+      spawnSync(TMUX, ["send-keys", "-t", session, cli, "Enter"]);
     } else {
       console.log(`Tmux session "${session}" already exists — skipping CLI launch (attach with: meshterm agent attach --name ${name})`);
     }
@@ -189,7 +198,7 @@ export async function runAgent(sub?: string, args?: string[]) {
 
     // Optionally kill tmux session
     if (opts["kill-session"] && tmuxSessionExists(entry.session)) {
-      spawnSync("tmux", ["kill-session", "-t", entry.session]);
+      spawnSync(TMUX, ["kill-session", "-t", entry.session]);
       console.log(`Killed tmux session: ${entry.session}`);
     }
 
@@ -241,7 +250,7 @@ export async function runAgent(sub?: string, args?: string[]) {
     }
 
     // Replace this process with tmux attach
-    const result = spawnSync("tmux", ["attach", "-t", entry.session], { stdio: "inherit" });
+    const result = spawnSync(TMUX, ["attach", "-t", entry.session], { stdio: "inherit" });
     process.exit(result.exitCode ?? 0);
   }
 
