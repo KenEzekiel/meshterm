@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
 
-const ENDPOINT = "https://t.meshterm.live/ping";
+const ENDPOINT = "https://meshterm-telemetry.ken35kiel.workers.dev/ping";
 const HOME = process.env.HOME ?? "~";
 const DIR = join(HOME, ".meshterm");
 const ID_FILE = join(DIR, ".telemetry-id");
