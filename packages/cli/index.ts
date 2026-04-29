@@ -24,7 +24,9 @@ interface Config {
 function loadConfig(): Config | null {
   if (!existsSync(CONFIG_FILE)) return null;
   try {
-    return JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
+    const config = JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
+    if (process.env.MESHTERM_AGENT) config.agent = process.env.MESHTERM_AGENT;
+    return config;
   } catch {
     return null;
   }
@@ -255,7 +257,7 @@ if (args.version) {
     const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf-8"));
     console.log(`meshterm v${pkg.version}`);
   } catch {
-    console.log("meshterm v0.11.2");
+    console.log("meshterm v0.12.0");
   }
   process.exit(0);
 }

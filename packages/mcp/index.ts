@@ -579,6 +579,10 @@ async function main() {
   let config: Config;
   try {
     config = loadConfig();
+    // Allow agent name override via env var (for multiple agents on same machine)
+    if (process.env.MESHTERM_AGENT) {
+      config.agent = process.env.MESHTERM_AGENT;
+    }
     console.error(`[MCP] Loaded config: agent=${config.agent}, server=${config.server}`);
   } catch (err: any) {
     console.error(`[MCP] Fatal: ${err.message}`);
