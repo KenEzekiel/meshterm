@@ -127,53 +127,79 @@ meshterm send alice "review my PR"
 
 ## Connect Your Agents
 
-There are two types of agents. Pick the one that matches your setup:
+After the server is running and you've run `meshterm init`, pick the setup that matches your agent:
 
 ### IDE agents (Kiro, Claude, Cursor, Copilot, Gemini)
 
-Your agent runs inside an IDE. It **sends** via MCP tools and **receives** by polling.
+Your agent runs inside an IDE or as a CLI chat. It **sends** via MCP tools and **receives** by polling.
 
+**Full setup:**
 ```bash
+# 1. Configure meshterm (once per machine)
+meshterm init --server https://your-server:4200 --key your-secret --agent my-agent
+
+# 2. Auto-configure your IDE agent
 meshterm setup kiro
 # Also supports: claude, cursor, copilot, gemini
+
+# 3. Restart your IDE / start a new CLI session
+
+# 4. Your agent now has these MCP tools:
+#    mesh_send    — send a message to any agent
+#    mesh_poll    — check for messages (shows recent history + read status)
+#    mesh_read    — read full message by ID
+#    mesh_reply   — reply to a message
+#    mesh_agents  — see who's online
+#    mesh_status  — mesh health overview
+#    + 7 more (rooms, roles)
 ```
 
-This creates:
-- **MCP config** — adds meshterm tools to your IDE (`~/.kiro/settings/mcp.json`, etc.)
+What `meshterm setup` creates:
+- **MCP config** — adds meshterm MCP server to your IDE config
 - **Steering file** — teaches the agent how to handle `[mesh:...]` messages
 
-After setup, restart your IDE. The agent gets tools like `mesh_send`, `mesh_poll`, `mesh_read`.
-
-> **Note:** IDE agents can only receive messages when they actively poll (`mesh_poll`). They don't get messages pushed to them automatically.
+> **Note:** IDE agents can only receive messages when they actively call `mesh_poll`. They don't get messages pushed automatically. For push delivery, use a terminal agent.
 
 ### Terminal agents (tmux)
 
-Your agent runs in a terminal. It **sends** via MCP or CLI and **receives** messages pushed into its tmux session automatically.
+Your agent runs in a tmux session. It **sends** via MCP or CLI and **receives** messages pushed into its terminal automatically.
 
+**Full setup:**
 ```bash
-# One command: creates tmux session + starts your CLI + starts message daemon
+# 1. Configure meshterm (once per machine)
+meshterm init --server https://your-server:4200 --key your-secret --agent my-agent
+
+# 2. Start the agent (creates tmux + CLI + message daemon)
 meshterm agent start --name my-agent --cli "kiro-cli chat" --session my-agent
 
-# Attach to see it
+# 3. Attach to the session
 meshterm agent attach --name my-agent
 
-# Detach: Ctrl+B then D
+# 4. Detach without stopping: Ctrl+B then D
 ```
 
-The daemon polls the mesh every 5 seconds and injects new messages into the tmux pane via `tmux send-keys`.
+What `meshterm agent start` does:
+1. Creates a tmux session with the given name
+2. Starts your CLI command inside it
+3. Starts a background daemon that polls for messages every 5s
+4. When a message arrives, the daemon types it into the tmux pane as `[mesh:sender] message`
 
 **Managing terminal agents:**
 ```bash
-meshterm agent list                          # see running agents
-meshterm agent attach --name my-agent        # attach to tmux session
-meshterm agent stop --name my-agent          # stop agent + daemon
-meshterm agent stop --name my-agent --kill-session  # also kill tmux session
+meshterm agent list                                  # see running agents + status
+meshterm agent attach --name my-agent                # attach to tmux session
+meshterm agent stop --name my-agent                  # stop daemon (keeps tmux)
+meshterm agent stop --name my-agent --kill-session   # stop daemon + kill tmux
 ```
 
-> **Already have a tmux session running?** Don't use `agent start` — it would type the CLI command into your existing session. Use the daemon directly:
-> ```bash
-> meshterm daemon start --agent my-agent --session my-session
-> ```
+**After a reboot:** The daemon doesn't survive restarts. Run `agent start` again — it detects the existing tmux session and only restarts the daemon:
+```bash
+meshterm agent start --name my-agent --cli "kiro-cli chat" --session my-agent
+# → "Tmux session already exists — skipping CLI launch"
+# → Daemon restarted
+```
+
+> **Already have a tmux session running?** `agent start` detects it and skips the CLI launch. It only starts the daemon. Safe to run on existing sessions.
 
 ### Webhook agents (OpenClaw, Slack, Discord)
 
