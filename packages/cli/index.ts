@@ -255,7 +255,7 @@ if (args.version) {
     const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf-8"));
     console.log(`meshterm v${pkg.version}`);
   } catch {
-    console.log("meshterm v0.11.1");
+    console.log("meshterm v0.11.2");
   }
   process.exit(0);
 }
@@ -744,7 +744,7 @@ switch (command) {
     const HOME = process.env.HOME ?? "~";
     
     // Agent configurations
-    const agentConfigs: Record<string, { mcpPath: string; steeringPath?: string; steeringDir?: string }> = {
+    const agentConfigs: Record<string, { mcpPath: string; mcpKey?: string; steeringPath?: string; steeringDir?: string }> = {
       kiro: {
         mcpPath: join(HOME, ".kiro", "settings", "mcp.json"),
         steeringPath: join(HOME, ".kiro", "steering", "meshterm.md"),
@@ -759,7 +759,8 @@ switch (command) {
         mcpPath: join(HOME, ".cursor", "mcp.json"),
       },
       copilot: {
-        mcpPath: join(HOME, ".github", "copilot", "mcp.json"),
+        mcpPath: join(HOME, ".vscode", "mcp.json"),
+        mcpKey: "servers", // VS Code Copilot uses "servers" not "mcpServers"
       },
       gemini: {
         mcpPath: join(HOME, ".gemini", "mcp.json"),
@@ -821,19 +822,19 @@ If you don't reply, the sender never sees your response.
         mkdirSync(mcpDir, { recursive: true });
       }
 
-      let existingMcpConfig: any = { mcpServers: {} };
+      let existingMcpConfig: any = {};
+      const mcpKey = agentConfig.mcpKey ?? "mcpServers";
       if (existsSync(agentConfig.mcpPath)) {
         try {
           existingMcpConfig = JSON.parse(readFileSync(agentConfig.mcpPath, "utf-8"));
-          if (!existingMcpConfig.mcpServers) {
-            existingMcpConfig.mcpServers = {};
-          }
-        } catch (err) {
+        } catch {
           console.warn(`⚠️  Could not parse existing MCP config, creating new one`);
         }
       }
-
-      existingMcpConfig.mcpServers.meshterm = mcpConfig.meshterm;
+      if (!existingMcpConfig[mcpKey]) {
+        existingMcpConfig[mcpKey] = {};
+      }
+      existingMcpConfig[mcpKey].meshterm = mcpConfig.meshterm;
       writeFileSync(agentConfig.mcpPath, JSON.stringify(existingMcpConfig, null, 2));
       console.log(`✅ MCP config written to ${agentConfig.mcpPath}`);
 
