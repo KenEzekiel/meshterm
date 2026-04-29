@@ -257,7 +257,7 @@ if (args.version) {
     const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf-8"));
     console.log(`meshterm v${pkg.version}`);
   } catch {
-    console.log("meshterm v0.12.0");
+    console.log("meshterm v0.12.1");
   }
   process.exit(0);
 }
@@ -746,7 +746,14 @@ switch (command) {
     const HOME = process.env.HOME ?? "~";
     
     // Agent configurations
-    const agentConfigs: Record<string, { mcpPath: string; mcpKey?: string; steeringPath?: string; steeringDir?: string }> = {
+    // Resolve VS Code user data path per platform
+    const vscodeUserDir = process.platform === "win32"
+      ? join(process.env.APPDATA ?? join(HOME, "AppData", "Roaming"), "Code", "User")
+      : process.platform === "darwin"
+        ? join(HOME, "Library", "Application Support", "Code", "User")
+        : join(HOME, ".config", "Code", "User");
+
+    const agentConfigs: Record<string, { mcpPath: string; mcpKey?: string; agentName?: string; steeringPath?: string; steeringDir?: string }> = {
       kiro: {
         mcpPath: join(HOME, ".kiro", "settings", "mcp.json"),
         steeringPath: join(HOME, ".kiro", "steering", "meshterm.md"),
@@ -754,18 +761,22 @@ switch (command) {
       },
       claude: {
         mcpPath: join(HOME, ".claude", "mcp.json"),
+        agentName: "claude-" + (process.env.HOSTNAME || "local"),
         steeringPath: join(HOME, ".claude", "skills", "meshterm", "SKILL.md"),
         steeringDir: join(HOME, ".claude", "skills", "meshterm"),
       },
       cursor: {
         mcpPath: join(HOME, ".cursor", "mcp.json"),
+        agentName: "cursor-" + (process.env.HOSTNAME || "local"),
       },
       copilot: {
-        mcpPath: join(HOME, ".vscode", "mcp.json"),
-        mcpKey: "servers", // VS Code Copilot uses "servers" not "mcpServers"
+        mcpPath: join(vscodeUserDir, "mcp.json"),
+        mcpKey: "servers",
+        agentName: "copilot-" + (process.env.HOSTNAME || "local"),
       },
       gemini: {
         mcpPath: join(HOME, ".gemini", "mcp.json"),
+        agentName: "gemini-" + (process.env.HOSTNAME || "local"),
       },
     };
 
@@ -810,12 +821,20 @@ If you don't reply, the sender never sees your response.
 - \`mesh_room_leave\` — leave a room
 `;
 
-    const mcpConfig = {
+    const mcpConfig: any = {
       meshterm: {
         command: "meshterm",
         args: ["mcp"],
       },
     };
+    // Add agent name override for non-default agents
+    if (agentConfig.agentName) {
+      mcpConfig.meshterm.env = { MESHTERM_AGENT: agentConfig.agentName };
+    }
+    // VS Code requires type field
+    if (agentConfig.mcpKey === "servers") {
+      mcpConfig.meshterm.type = "stdio";
+    }
 
     try {
       // 1. Write/merge MCP config
