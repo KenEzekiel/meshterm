@@ -8,6 +8,7 @@
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { timingSafeEqual } from "crypto";
+import { track, trackMessage } from "../telemetry";
 
 const PORT = Number(process.env.MESH_PORT ?? 4200);
 const SECRET = process.env.MESH_SECRET ?? "mesh-dev-secret";
@@ -318,6 +319,7 @@ Bun.serve({
       };
       agents.set(agent.name, agent);
       persist();
+      track("agent_connect");
       return json({ ok: true, agent });
     }
 
@@ -389,6 +391,7 @@ Bun.serve({
     // POST /messages { from_agent, to_agent, body, broadcast? }
     if (method === "POST" && path === "/messages") {
       const body = await req.json();
+      trackMessage();
       if (!body.from_agent || !body.to_agent || !body.body) {
         return json({ error: "missing from_agent, to_agent, or body" }, 400);
       }
@@ -776,3 +779,4 @@ Bun.serve({
 });
 
 console.log(`🕸️  Agent Mesh running on :${PORT}`);
+track("server_start");

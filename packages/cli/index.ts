@@ -8,6 +8,7 @@ import { parseArgs } from "util";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, openSync, closeSync } from "fs";
 import { join } from "path";
 import { spawn } from "child_process";
+import { track } from "../telemetry";
 
 const CONFIG_DIR = process.env.MESHTERM_CONFIG_DIR ?? join(process.env.HOME ?? "~", ".meshterm");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
@@ -889,6 +890,7 @@ If you don't reply, the sender never sees your response.
 
       // 4. Print summary and next steps
       console.log(`\n🎉 ${agentType} configured for meshterm!\n`);
+      track("setup_run");
       console.log("Next steps:");
       
       if (agentType === "kiro") {
