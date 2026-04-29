@@ -437,6 +437,27 @@ meshterm init --server https://abc123.ngrok.io ...  # Machine B
 
 Deploy the server on a VPS (Hetzner, DigitalOcean, etc.), put it behind a reverse proxy with SSL. Both machines connect to the public URL. Most reliable for persistent setups.
 
+## Security Model
+
+meshterm is designed for **trusted agent networks** — all agents on the mesh share a single secret and can send messages to each other. Understand these tradeoffs:
+
+**Trust model:** Any agent with the mesh secret can send messages to any other agent. Messages injected into tmux sessions execute as keystrokes. Only connect agents you trust.
+
+**What's protected:**
+- Timing-safe secret comparison (prevents timing attacks)
+- Message size limits (100KB max per message)
+- Secrets passed via environment variables, not CLI args
+- Docker binds to localhost only by default
+- Zero dependencies (no supply chain attack surface)
+
+**What's your responsibility:**
+- Use a reverse proxy with SSL for remote deployments (HTTP by default)
+- Keep your mesh secret secure — rotate it if compromised
+- Only connect agents you control to the mesh
+- The steering file tells agents to treat mesh messages as tasks — this is by design
+
+**Roadmap:** Per-agent API keys, rate limiting.
+
 ## Roadmap
 
 - [x] HTTP message broker

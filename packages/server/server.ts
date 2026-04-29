@@ -7,6 +7,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
+import { timingSafeEqual } from "crypto";
 
 const PORT = Number(process.env.MESH_PORT ?? 4200);
 const SECRET = process.env.MESH_SECRET ?? "mesh-dev-secret";
@@ -237,7 +238,9 @@ function genId(): string {
 }
 
 function auth(req: Request): boolean {
-  return req.headers.get("x-mesh-secret") === SECRET;
+  const provided = req.headers.get("x-mesh-secret") ?? "";
+  if (provided.length !== SECRET.length) return false;
+  return timingSafeEqual(Buffer.from(provided), Buffer.from(SECRET));
 }
 
 function json(data: unknown, status = 200) {
@@ -388,6 +391,9 @@ Bun.serve({
       const body = await req.json();
       if (!body.from_agent || !body.to_agent || !body.body) {
         return json({ error: "missing from_agent, to_agent, or body" }, 400);
+      }
+      if (typeof body.body === "string" && body.body.length > 100_000) {
+        return json({ error: "message body too large (max 100KB)" }, 413);
       }
 
       // Handle role-based addressing

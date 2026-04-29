@@ -121,13 +121,13 @@ export async function runAgent(sub?: string, args?: string[]) {
       "--agent", name,
       "--session", session,
       "--mesh", mesh,
-      "--secret", secret,
       "--type", opts.type!,
       "--host", opts.host!,
     ], {
       stdout: "ignore",
       stderr: "ignore",
       stdin: "ignore",
+      env: { ...process.env, MESH_SECRET: secret },
     });
     // Detach so it survives this process exiting
     proc.unref();
