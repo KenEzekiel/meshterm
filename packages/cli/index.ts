@@ -257,7 +257,7 @@ if (args.version) {
     const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf-8"));
     console.log(`meshterm v${pkg.version}`);
   } catch {
-    console.log("meshterm v0.12.1");
+    console.log("meshterm v0.12.2");
   }
   process.exit(0);
 }
@@ -761,22 +761,22 @@ switch (command) {
       },
       claude: {
         mcpPath: join(HOME, ".claude", "mcp.json"),
-        agentName: "claude-" + (process.env.HOSTNAME || "local"),
+        agentName: config ? `${config.agent}-claude` : "claude",
         steeringPath: join(HOME, ".claude", "skills", "meshterm", "SKILL.md"),
         steeringDir: join(HOME, ".claude", "skills", "meshterm"),
       },
       cursor: {
         mcpPath: join(HOME, ".cursor", "mcp.json"),
-        agentName: "cursor-" + (process.env.HOSTNAME || "local"),
+        agentName: config ? `${config.agent}-cursor` : "cursor",
       },
       copilot: {
         mcpPath: join(vscodeUserDir, "mcp.json"),
         mcpKey: "servers",
-        agentName: "copilot-" + (process.env.HOSTNAME || "local"),
+        agentName: config ? `${config.agent}-copilot` : "copilot",
       },
       gemini: {
         mcpPath: join(HOME, ".gemini", "mcp.json"),
-        agentName: "gemini-" + (process.env.HOSTNAME || "local"),
+        agentName: config ? `${config.agent}-gemini` : "gemini",
       },
     };
 
