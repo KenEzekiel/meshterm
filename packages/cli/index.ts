@@ -257,7 +257,7 @@ if (args.version) {
     const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf-8"));
     console.log(`meshterm v${pkg.version}`);
   } catch {
-    console.log("meshterm v0.12.2");
+    console.log("meshterm v0.12.3");
   }
   process.exit(0);
 }
@@ -756,27 +756,28 @@ switch (command) {
     const agentConfigs: Record<string, { mcpPath: string; mcpKey?: string; agentName?: string; steeringPath?: string; steeringDir?: string }> = {
       kiro: {
         mcpPath: join(HOME, ".kiro", "settings", "mcp.json"),
+        agentName: config ? `kiro-${config.agent}` : "kiro",
         steeringPath: join(HOME, ".kiro", "steering", "meshterm.md"),
         steeringDir: join(HOME, ".kiro", "steering"),
       },
       claude: {
         mcpPath: join(HOME, ".claude", "mcp.json"),
-        agentName: config ? `${config.agent}-claude` : "claude",
+        agentName: config ? `claude-${config.agent}` : "claude",
         steeringPath: join(HOME, ".claude", "skills", "meshterm", "SKILL.md"),
         steeringDir: join(HOME, ".claude", "skills", "meshterm"),
       },
       cursor: {
         mcpPath: join(HOME, ".cursor", "mcp.json"),
-        agentName: config ? `${config.agent}-cursor` : "cursor",
+        agentName: config ? `cursor-${config.agent}` : "cursor",
       },
       copilot: {
         mcpPath: join(vscodeUserDir, "mcp.json"),
         mcpKey: "servers",
-        agentName: config ? `${config.agent}-copilot` : "copilot",
+        agentName: config ? `copilot-${config.agent}` : "copilot",
       },
       gemini: {
         mcpPath: join(HOME, ".gemini", "mcp.json"),
-        agentName: config ? `${config.agent}-gemini` : "gemini",
+        agentName: config ? `gemini-${config.agent}` : "gemini",
       },
     };
 
