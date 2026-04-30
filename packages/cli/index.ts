@@ -1040,7 +1040,7 @@ TOOLS
   mcp                                     Start MCP server (stdio, for AI agents)
 
 AGENT LIFECYCLE
-  agent start --name <n> --cli <cmd> --session <tmux>   Start agent (tmux + CLI + mesh-client)
+  agent start --name <n> --cli <cmd> [--session <tmux>]   Start agent (tmux + CLI + mesh-client)
   agent stop --name <n> [--kill-session]                 Stop agent cleanly
   agent list                                             Show running agents with status
 

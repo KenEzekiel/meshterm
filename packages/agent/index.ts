@@ -98,12 +98,16 @@ export async function runAgent(sub?: string, args?: string[]) {
       },
     });
 
-    if (!opts.name || !opts.cli || !opts.session) {
-      console.error("Usage: meshterm-agent.ts start --name <name> --cli <command> --session <session> [--mesh <url>] [--secret <secret>]");
+    if (!opts.name || !opts.cli) {
+      console.error("Usage: meshterm agent start --name <name> --cli <command> [--session <session>] [--mesh <url>] [--secret <secret>]");
       process.exit(1);
     }
 
-    const { name, cli, session, mesh, secret } = opts as { name: string; cli: string; session: string; mesh: string; secret: string };
+    const name = opts.name as string;
+    const cli = opts.cli as string;
+    const session = (opts.session ?? opts.name) as string;
+    const mesh = opts.mesh as string;
+    const secret = opts.secret as string;
 
     // 1. Create tmux session if not exists
     if (!tmuxSessionExists(session)) {
