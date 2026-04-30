@@ -113,11 +113,8 @@ export async function runAgent(sub?: string, args?: string[]) {
     // 1. Create tmux session if not exists
     if (!tmuxSessionExists(session)) {
       console.log(`Creating tmux session: ${session}`);
-      spawnSync(TMUX, ["new-session", "-d", "-s", session]);
-
-      // 2. Send CLI command into tmux (only for new sessions)
       console.log(`Starting CLI: ${cli}`);
-      spawnSync(TMUX, ["send-keys", "-t", session, cli, "Enter"]);
+      spawnSync(TMUX, ["new-session", "-d", "-s", session, cli]);
     } else {
       console.log(`Tmux session "${session}" already exists — skipping CLI launch (attach with: meshterm agent attach --name ${name})`);
     }
