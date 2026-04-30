@@ -9,6 +9,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, openSyn
 import { join } from "path";
 import { spawn } from "child_process";
 import { track } from "../telemetry";
+// @ts-ignore — bun resolves JSON imports at compile time
+import pkg from "../../package.json";
 
 const CONFIG_DIR = process.env.MESHTERM_CONFIG_DIR ?? join(process.env.HOME ?? "~", ".meshterm");
 // Profile resolved after parseArgs below
@@ -272,12 +274,7 @@ if (args.help || (!command && positionals.length === 0)) {
 }
 
 if (args.version) {
-  try {
-    const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf-8"));
-    console.log(`meshterm v${pkg.version}`);
-  } catch {
-    console.log("meshterm v0.16.1");
-  }
+  console.log(`meshterm v${pkg.version}`);
   process.exit(0);
 }
 
@@ -1002,9 +999,7 @@ If you don't reply, the sender never sees your response.
   }
 
   default:
-    let helpVersion = "0.10.1";
-    try { helpVersion = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf-8")).version; } catch {}
-    console.log(`meshterm v${helpVersion} — Agent-agnostic communication layer for AI agents
+    console.log(`meshterm v${pkg.version} — Agent-agnostic communication layer for AI agents
 
 SETUP
   init                                    Configure meshterm (server URL, API key, agent name)
