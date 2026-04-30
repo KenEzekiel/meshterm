@@ -105,25 +105,33 @@ function startDaemon(agent: string, session: string, config: Config) {
   // Open log file for writing (append mode)
   const logFd = openSync(DAEMON_LOG_FILE, "a");
   
-  // Spawn detached process with output redirected to log file
-  const proc = spawn(
-    "bun",
-    [
-      "run",
-      clientPath,
-      "--agent", agent,
-      "--session", session,
-      "--mesh", config.server,
-      "--secret", config.secret,
-      "--poll", args.poll ?? "5000",
-      "--type", args.type ?? "unknown",
-      "--host", args.host ?? "unknown",
-    ],
-    {
-      detached: true,
-      stdio: ["ignore", logFd, logFd],
-    }
-  );
+  // Spawn the daemon — pass config via env vars so it works in all modes.
+  // Detect compiled binary vs npx/bun run: compiled binary has $bunfs in import.meta.dir
+  const isCompiled = import.meta.dir.includes("$bunfs");
+  const daemonEnv = {
+    ...process.env,
+    __MESH_CLIENT_AGENT: agent,
+    __MESH_CLIENT_SESSION: session,
+    __MESH_CLIENT_MESH: config.server,
+    __MESH_CLIENT_SECRET: config.secret,
+    __MESH_CLIENT_POLL: args.poll ?? "5000",
+    __MESH_CLIENT_TYPE: args.type ?? "unknown",
+    __MESH_CLIENT_HOST: args.host ?? "unknown",
+  };
+
+  const spawnCmd = isCompiled
+    ? { cmd: process.execPath, args: ["client", "start", "--session", session] }
+    : { cmd: "bun", args: ["run", join(import.meta.dir, "../client/mesh-client.ts"),
+        "--agent", agent, "--session", session,
+        "--mesh", config.server, "--secret", config.secret,
+        "--poll", args.poll ?? "5000", "--type", args.type ?? "unknown",
+        "--host", args.host ?? "unknown"] };
+
+  const proc = spawn(spawnCmd.cmd, spawnCmd.args, {
+    detached: true,
+    stdio: ["ignore", logFd, logFd],
+    env: daemonEnv,
+  });
 
   // Unref so parent can exit
   proc.unref();
@@ -706,26 +714,16 @@ switch (command) {
       }
 
       console.log(`🕸️  Starting mesh client for ${agent} (tmux session: ${session})`);
-      const clientPath = join(import.meta.dir, "../client/mesh-client.ts");
-      const proc = spawn(
-        "bun",
-        [
-          "run",
-          clientPath,
-          "--agent", agent,
-          "--session", session,
-          "--mesh", config.server,
-          "--secret", config.secret,
-          "--poll", args.poll ?? "5000",
-          "--type", args.type ?? "unknown",
-          "--host", args.host ?? "unknown",
-        ],
-        {
-          stdio: "inherit",
-          env: process.env,
-        }
-      );
-      proc.on("exit", (code) => process.exit(code ?? 0));
+      
+      // Run client inline — avoids $bunfs module resolution issues in compiled binaries
+      process.env.__MESH_CLIENT_AGENT = agent;
+      process.env.__MESH_CLIENT_SESSION = session;
+      process.env.__MESH_CLIENT_MESH = config.server;
+      process.env.__MESH_CLIENT_SECRET = config.secret;
+      process.env.__MESH_CLIENT_POLL = args.poll ?? "5000";
+      process.env.__MESH_CLIENT_TYPE = args.type ?? "unknown";
+      process.env.__MESH_CLIENT_HOST = args.host ?? "unknown";
+      await import("../client/mesh-client.ts");
     } else {
       console.log("Usage: meshterm client start --agent <name> --session <tmux-session>");
     }

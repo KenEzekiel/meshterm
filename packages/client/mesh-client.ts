@@ -10,14 +10,15 @@ import { parseArgs } from "util";
 
 const { values: args } = parseArgs({
   options: {
-    agent: { type: "string", default: "" },
-    session: { type: "string", default: "kiro" },
-    mesh: { type: "string", default: "http://localhost:4200" },
-    secret: { type: "string", default: process.env.MESH_SECRET ?? "" },
-    poll: { type: "string", default: "5000" },
-    type: { type: "string", default: "kiro" },
-    host: { type: "string", default: "unknown" },
+    agent: { type: "string", default: process.env.__MESH_CLIENT_AGENT ?? "" },
+    session: { type: "string", default: process.env.__MESH_CLIENT_SESSION ?? "kiro" },
+    mesh: { type: "string", default: process.env.__MESH_CLIENT_MESH ?? "http://localhost:4200" },
+    secret: { type: "string", default: process.env.__MESH_CLIENT_SECRET ?? process.env.MESH_SECRET ?? "" },
+    poll: { type: "string", default: process.env.__MESH_CLIENT_POLL ?? "5000" },
+    type: { type: "string", default: process.env.__MESH_CLIENT_TYPE ?? "kiro" },
+    host: { type: "string", default: process.env.__MESH_CLIENT_HOST ?? "unknown" },
   },
+  strict: false,
 });
 
 const MESH = args.mesh!;
