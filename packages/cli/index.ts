@@ -11,7 +11,8 @@ import { spawn } from "child_process";
 import { track } from "../telemetry";
 
 const CONFIG_DIR = process.env.MESHTERM_CONFIG_DIR ?? join(process.env.HOME ?? "~", ".meshterm");
-const CONFIG_FILE = join(CONFIG_DIR, "config.json");
+// Profile resolved after parseArgs below
+let CONFIG_FILE = join(CONFIG_DIR, "config.json");
 const DAEMON_PID_FILE = join(CONFIG_DIR, "daemon.pid");
 const DAEMON_LOG_FILE = join(CONFIG_DIR, "daemon.log");
 const DAEMON_INFO_FILE = join(CONFIG_DIR, "daemon.json");
@@ -34,7 +35,8 @@ function loadConfig(): Config | null {
 }
 
 function saveConfig(config: Config) {
-  if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
+  const dir = CONFIG_FILE.substring(0, CONFIG_FILE.lastIndexOf("/"));
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
 }
 
@@ -250,9 +252,17 @@ const { values: args, positionals } = parseArgs({
     mode: { type: "string" },
     moderator: { type: "string" },
     limit: { type: "string" },
+    profile: { type: "string" },
+    force: { type: "boolean", default: false },
   },
   allowPositionals: true,
 });
+
+// Resolve profile → config file path
+const PROFILE = args.profile ?? process.env.MESHTERM_PROFILE;
+if (PROFILE) {
+  CONFIG_FILE = join(CONFIG_DIR, "profiles", `${PROFILE}.json`);
+}
 
 const [command, ...rest] = positionals;
 

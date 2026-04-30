@@ -9,7 +9,10 @@ import { join } from "path";
 import { createInterface } from "readline";
 
 const CONFIG_DIR = process.env.MESHTERM_CONFIG_DIR ?? join(process.env.HOME ?? "~", ".meshterm");
-const CONFIG_FILE = join(CONFIG_DIR, "config.json");
+const PROFILE = process.env.MESHTERM_PROFILE;
+const CONFIG_FILE = PROFILE
+  ? join(CONFIG_DIR, "profiles", `${PROFILE}.json`)
+  : join(CONFIG_DIR, "config.json");
 
 interface Config {
   server: string;
