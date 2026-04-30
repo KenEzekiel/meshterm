@@ -79,7 +79,7 @@ async function pollAndInject() {
       // Skip if already in retry queue (handled below)
       if (retryQueue.has(msg.id)) continue;
 
-      const injected = `[mesh:${msg.from_agent}] ${msg.body}`;
+      const injected = `[mesh:${msg.from_agent}#${msg.id}] ${msg.body}`;
       if (tmuxSend(SESSION, injected)) {
         // Success — mark as read immediately
         await meshFetch(`/messages/${msg.id}/read`, { method: "PATCH" });
@@ -101,7 +101,7 @@ async function pollAndInject() {
       }
       if (now - entry.lastAttemptAt < RETRY_INTERVAL_MS) continue;
 
-      const injected = `[mesh:${entry.msg.from_agent}] ${entry.msg.body}`;
+      const injected = `[mesh:${entry.msg.from_agent}#${entry.msg.id}] ${entry.msg.body}`;
       if (tmuxSend(SESSION, injected)) {
         await meshFetch(`/messages/${id}/read`, { method: "PATCH" });
         console.log(`🔄 Retry success (attempt ${entry.attempts + 1}): ${entry.msg.body.slice(0, 60)}...`);

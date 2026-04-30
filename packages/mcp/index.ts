@@ -100,6 +100,10 @@ const TOOLS = [
           type: "string",
           description: "Reply message body",
         },
+        in_reply_to: {
+          type: "string",
+          description: "Message ID being replied to (from mesh_poll or [mesh:agent#id] format)",
+        },
         broadcast: {
           type: "boolean",
           description: "If true and 'to' is a role, send to all agents in that role (default: false)",
@@ -260,7 +264,7 @@ async function handleToolCall(name: string, args: any, config: Config): Promise<
   switch (name) {
     case "mesh_send":
     case "mesh_reply": {
-      const { to, message, broadcast } = args;
+      const { to, message, broadcast, in_reply_to } = args;
       if (!to || !message) {
         throw new Error("Missing required parameters: to, message");
       }
@@ -273,6 +277,9 @@ async function handleToolCall(name: string, args: any, config: Config): Promise<
       
       if (broadcast) {
         payload.broadcast = true;
+      }
+      if (in_reply_to) {
+        payload.reply_to = in_reply_to;
       }
       
       const result = await meshFetch("/messages", config, {

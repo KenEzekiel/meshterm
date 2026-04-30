@@ -258,7 +258,7 @@ if (args.version) {
     const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf-8"));
     console.log(`meshterm v${pkg.version}`);
   } catch {
-    console.log("meshterm v0.12.3");
+    console.log("meshterm v0.13.0");
   }
   process.exit(0);
 }

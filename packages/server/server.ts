@@ -153,6 +153,7 @@ interface Message {
   to_agent: string;
   body: string;
   source?: string; // "room:<name>" if from a room message
+  reply_to?: string; // message ID this is replying to
   created_at: string;
   read: boolean;
   state: "queued" | "fetched";
@@ -485,6 +486,7 @@ Bun.serve({
         from_agent: body.from_agent,
         to_agent: body.to_agent,
         body: body.body,
+        ...(body.reply_to ? { reply_to: body.reply_to } : {}),
         created_at: new Date().toISOString(),
         read: false,
         state: "queued",
