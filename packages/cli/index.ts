@@ -275,6 +275,15 @@ if (args.version) {
 
 switch (command) {
   case "init": {
+    const existing = loadConfig();
+    if (existing && !args.force) {
+      console.log(`⚠️  Existing config found: server=${existing.server}, agent=${existing.agent}`);
+      const overwrite = prompt("Overwrite? (y/N):", "N");
+      if (overwrite?.toLowerCase() !== "y") {
+        console.log("Aborted.");
+        process.exit(0);
+      }
+    }
     let server = args.server;
     let secret = args.key;
 
