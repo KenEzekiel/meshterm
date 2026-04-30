@@ -38,6 +38,7 @@ interface AgentEntry {
   meshClientPid: number;
   meshUrl: string;
   cli: string;
+  profile: string;
   startedAt: string;
 }
 
@@ -162,6 +163,7 @@ export async function runAgent(sub?: string, args?: string[]) {
       meshClientPid: proc.pid,
       meshUrl: mesh,
       cli,
+      profile: PROFILE ?? "default",
       startedAt: new Date().toISOString(),
     };
     saveState(state);
@@ -217,16 +219,19 @@ export async function runAgent(sub?: string, args?: string[]) {
 
   case "list": {
     const state = loadState();
-    const names = Object.keys(state);
-    if (names.length === 0) {
+    const entries = Object.values(state).filter(
+      e => !PROFILE || (e.profile ?? "default") === PROFILE
+    );
+    if (entries.length === 0) {
       console.log("No agents running.");
       break;
     }
-    for (const entry of Object.values(state)) {
+    for (const entry of entries) {
       const alive = isAlive(entry.meshClientPid);
       const sessionUp = tmuxSessionExists(entry.session);
       const status = alive && sessionUp ? "✅ running" : alive ? "⚠️  no tmux" : sessionUp ? "⚠️  no mesh-client" : "❌ dead";
-      console.log(`${entry.name}  session=${entry.session}  pid=${entry.meshClientPid}  ${status}  started=${entry.startedAt}`);
+      const prof = entry.profile && entry.profile !== "default" ? `  profile=${entry.profile}` : "";
+      console.log(`${entry.name}  session=${entry.session}  pid=${entry.meshClientPid}  ${status}${prof}  started=${entry.startedAt}`);
     }
     break;
   }
