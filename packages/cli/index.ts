@@ -276,7 +276,7 @@ if (args.version) {
     const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf-8"));
     console.log(`meshterm v${pkg.version}`);
   } catch {
-    console.log("meshterm v0.15.0");
+    console.log("meshterm v0.15.1");
   }
   process.exit(0);
 }
@@ -317,6 +317,7 @@ switch (command) {
         console.log(`✅ Server provisioned: ${server}`);
         console.log(`🔑 Secret: ${secret}`);
         console.log(`\n⚠️  Save this secret — it's the only way to access your server.\n`);
+        track("server_provisioned");
       } catch (e: any) {
         console.error(`❌ Could not reach meshterm.live: ${e.message}`);
         process.exit(1);
