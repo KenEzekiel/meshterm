@@ -258,7 +258,7 @@ if (args.version) {
     const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf-8"));
     console.log(`meshterm v${pkg.version}`);
   } catch {
-    console.log("meshterm v0.13.1");
+    console.log("meshterm v0.14.0");
   }
   process.exit(0);
 }
@@ -267,9 +267,39 @@ if (args.version) {
 
 switch (command) {
   case "init": {
-    const server = args.server ?? prompt("Mesh server URL:", "http://localhost:4200");
-    const secret = args.key ?? prompt("API key:", "");
-    const agent = args.agent ?? prompt("Agent name:", "my-agent");
+    let server = args.server;
+    let secret = args.key;
+
+    if (!server) {
+      server = prompt("Server URL (blank = free server from meshterm.live):", "") ?? "";
+    }
+
+    if (!server) {
+      // Provision a free server
+      console.log("\n🌐 Provisioning a free server on meshterm.live...");
+      try {
+        const res = await fetch("https://api.meshterm.live/provision", { method: "POST" });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          console.error(`❌ Provisioning failed: ${(err as any).error ?? res.statusText}`);
+          process.exit(1);
+        }
+        const data = await res.json() as { url: string; secret: string };
+        server = data.url;
+        secret = data.secret;
+        console.log(`✅ Server provisioned: ${server}`);
+        console.log(`🔑 Secret: ${secret}`);
+        console.log(`\n⚠️  Save this secret — it's the only way to access your server.\n`);
+      } catch (e: any) {
+        console.error(`❌ Could not reach meshterm.live: ${e.message}`);
+        process.exit(1);
+      }
+    }
+
+    if (!secret) {
+      secret = prompt("API key:", "") ?? "";
+    }
+    const agent = args.agent ?? prompt("Agent name:", "my-agent") ?? "";
 
     if (!server || !secret || !agent) {
       console.error("❌ All fields required");
@@ -616,6 +646,7 @@ switch (command) {
       if (args.secret) env.MESH_SECRET = args.secret;
       if (args.store) env.MESH_STORE = args.store;
       console.log(`🕸️  Starting mesh server on :${args.port ?? env.MESH_PORT ?? "4200"}...`);
+      console.log(`\n💡 Don't want to self-host? Get a free server at https://meshterm.live\n   Run: meshterm init (leave server blank)\n`);
       const serverPath = join(import.meta.dir, "../server/server.ts");
       const proc = spawn(process.execPath, ["run", serverPath], {
         stdio: "inherit",
