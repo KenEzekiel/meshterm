@@ -16,7 +16,10 @@ import { spawnSync } from "child_process";
 
 const STATE_DIR = process.env.MESHTERM_CONFIG_DIR ?? join(homedir(), ".meshterm");
 const STATE_FILE = join(STATE_DIR, "agents.json");
-const CONFIG_FILE = join(STATE_DIR, "config.json");
+const PROFILE = process.env.MESHTERM_PROFILE;
+const CONFIG_FILE = PROFILE
+  ? join(STATE_DIR, "profiles", `${PROFILE}.json`)
+  : join(STATE_DIR, "config.json");
 
 // Load meshterm config for defaults
 function loadMeshConfig(): { server: string; secret: string; agent: string } | null {
