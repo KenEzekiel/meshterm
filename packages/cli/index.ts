@@ -1002,6 +1002,7 @@ If you don't reply, the sender never sees your response.
 
 SETUP
   init                                    Configure meshterm (server URL, API key, agent name)
+  init --profile <name>                   Save config as a named profile
   setup <agent> [--session <tmux>]        Auto-configure an AI agent (kiro/claude/cursor/copilot/gemini)
 
 MESSAGING
@@ -1043,11 +1044,16 @@ AGENT LIFECYCLE
   agent list                                             Show running agents with status
 
 FLAGS
+  --profile <name>                        Use a named profile (or set MESHTERM_PROFILE env var)
+  --force                                 Skip overwrite confirmation on init
   --help, -h                              Show this help
   --version, -v                           Show version
 
 EXAMPLES
+  meshterm init                                           Free server from meshterm.live
   meshterm init --server https://mesh.example.com --key sk_xxx --agent my-agent
+  meshterm init --profile work --server https://work.example.com --key sk_xxx --agent work
+  meshterm status --profile work
   meshterm server start --port 4200 --secret my-secret
   meshterm setup kiro --session kiro
   meshterm send agent-1 "refactor auth module"
