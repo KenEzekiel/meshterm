@@ -4,9 +4,10 @@
   "description": "Agent-agnostic communication layer for AI agents",
   "type": "module",
   "bin": {
-    "meshterm": "./packages/cli/index.ts"
+    "meshterm": "./bin/meshterm.mjs"
   },
   "files": [
+    "bin/",
     "packages/",
     "skills/",
     "README.md",
