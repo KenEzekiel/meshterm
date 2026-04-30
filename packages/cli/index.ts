@@ -990,6 +990,7 @@ If you don't reply, the sender never sees your response.
     }
 
     const [agentSub, ...agentRest] = agentRawArgs;
+    if (PROFILE) process.env.MESHTERM_PROFILE = PROFILE;
     const { runAgent } = await import("../agent/index.ts");
     await runAgent(agentSub, agentRest);
     break;
