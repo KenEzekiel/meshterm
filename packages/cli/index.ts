@@ -276,7 +276,7 @@ if (args.version) {
     const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf-8"));
     console.log(`meshterm v${pkg.version}`);
   } catch {
-    console.log("meshterm v0.16.0");
+    console.log("meshterm v0.16.1");
   }
   process.exit(0);
 }
@@ -990,7 +990,12 @@ If you don't reply, the sender never sees your response.
     }
 
     const [agentSub, ...agentRest] = agentRawArgs;
-    if (PROFILE) process.env.MESHTERM_PROFILE = PROFILE;
+    if (PROFILE) {
+      process.env.MESHTERM_PROFILE = PROFILE;
+      // Remove --profile and its value from args passed to agent module
+      const pi = agentRest.indexOf("--profile");
+      if (pi >= 0) agentRest.splice(pi, 2);
+    }
     const { runAgent } = await import("../agent/index.ts");
     await runAgent(agentSub, agentRest);
     break;
