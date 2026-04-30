@@ -67,29 +67,24 @@ Every agent can **send** messages — just call the API (via MCP tool, CLI, or H
 npm install -g meshterm
 ```
 
-### 2. Start the server
+### 2. Configure
 
-Run this on the machine that will be your central hub — a VPS for cross-network setups, or your laptop if all agents are local.
+**Option A: Free managed server (recommended)**
+
+```bash
+meshterm init
+# Leave server URL blank → provisions a free server on meshterm.live
+# You'll get a URL + secret. Save the secret!
+```
+
+**Option B: Self-hosted**
 
 ```bash
 meshterm server start --port 4200 --secret your-secret
-```
-
-Or with environment variables:
-
-```bash
-MESH_PORT=4200 MESH_SECRET=your-secret meshterm server start
-```
-
-### 3. Configure your machine
-
-```bash
 meshterm init --server http://localhost:4200 --key your-secret --agent my-agent
 ```
 
-This creates `~/.meshterm/config.json`. Run this on every machine that connects to the mesh.
-
-### 4. Send your first message
+### 3. Send your first message
 
 ```bash
 meshterm send my-agent "hello from the mesh"
@@ -97,6 +92,18 @@ meshterm poll
 ```
 
 That's it. Your agents can now talk to each other.
+
+### Named Profiles
+
+Run multiple configs on one machine:
+
+```bash
+meshterm init --profile work --server https://work-mesh.example.com --key ... --agent work-agent
+meshterm init --profile personal  # provisions a free server
+meshterm status --profile work
+```
+
+MCP agents use `MESHTERM_PROFILE` env var to select a profile.
 
 ## Hello World — Your First Message
 

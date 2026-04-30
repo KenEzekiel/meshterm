@@ -2,6 +2,75 @@
 
 All notable changes to meshterm will be documented in this file.
 
+## [0.15.0] - 2026-04-30
+
+### Added
+- **Named profiles** — `meshterm init --profile work` saves to `~/.meshterm/profiles/work.json`
+- `--profile` flag and `MESHTERM_PROFILE` env var for all commands and MCP
+- Overwrite guard on `meshterm init` — warns before replacing existing config
+- `--force` flag to skip the guard
+
+### Fixed
+- npm `bin` entry pointed to `.ts` file (npm silently stripped it on publish). Created `bin/meshterm.mjs` wrapper — `npm install -g meshterm` now works correctly.
+
+## [0.14.0] - 2026-04-30
+
+### Added
+- **meshterm Cloud** — free managed servers at meshterm.live
+- `meshterm init` with blank server URL auto-provisions a free server
+- CLI banner on `meshterm server start` promoting meshterm.live
+- Provision API at `api.meshterm.live` — spins up isolated Docker containers per tenant
+- Traefik reverse proxy with wildcard SSL on `*.meshterm.live`
+- Reaper cron — pauses idle servers after 30 days, deletes after 60
+
+## [0.13.0] - 2026-04-30
+
+### Added
+- **Message threading** — `reply_to` field on messages
+- `mesh_reply` MCP tool accepts optional `in_reply_to` parameter
+- `mesh_read` added to steering tool list
+- Daemon injects messages as `[mesh:sender#msgid]` (includes message ID)
+- Steering teaches agents about `user:` prefix — human messages get highest priority
+
+## [0.12.0] - 2026-04-29
+
+### Added
+- **`MESHTERM_AGENT` env var** — override agent name per MCP instance
+- Multiple agents on one machine with unique identities
+- `meshterm setup` auto-generates `<type>-<agent>` names (e.g., `kiro-mac`, `copilot-mac`, `cursor-mac`)
+- Anonymous telemetry (opt-out via `MESHTERM_TELEMETRY=0` or `config.telemetry=false`)
+
+### Fixed
+- `meshterm setup copilot` — correct VS Code path (`~/Library/.../Code/User/mcp.json` on macOS, `%APPDATA%/Code/User` on Windows) and `servers` key instead of `mcpServers`
+- Daemon spawn in compiled binary mode
+
+## [0.11.0] - 2026-04-24
+
+### Added
+- Security hardening: timing-safe auth (`crypto.timingSafeEqual`), 100KB message body limit
+- Secret passed via `MESH_SECRET` env var (not CLI arg)
+- Security Model section in README
+
+### Fixed
+- tmux detection — proper path resolution + `.status` instead of `.exitCode`
+- Agent start skips CLI launch if tmux session already exists
+
+## [0.10.0] - 2026-04-23
+
+### Added
+- Message states (`queued` → `fetched`) with timestamps
+- Heartbeat endpoint for agent liveness
+- Message status endpoint
+- Source field on room message copies
+- Recipient info on send response
+- Room mode enforcement (round-robin turn order, moderated access control)
+- `mesh_read` MCP tool + message IDs in `mesh_poll`
+
+## [0.9.0] - 2026-04-23
+
+### Added
+- Agent lifecycle in CLI (`meshterm agent start/stop/list/attach`)
+
 ## [0.8.0] - 2026-04-23
 
 ### Added
