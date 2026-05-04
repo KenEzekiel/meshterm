@@ -791,6 +791,7 @@ switch (command) {
       process.exit(1);
     }
 
+    const config = loadConfig();
     const HOME = process.env.HOME ?? "~";
     
     // Agent configurations
@@ -926,7 +927,6 @@ If you don't reply, the sender never sees your response.
       }
 
       // 3. Ask for tmux session and auto-start daemon
-      const config = loadConfig()!;
       let tmuxSession = args.session;
       
       if (!tmuxSession) {
