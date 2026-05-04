@@ -15,9 +15,9 @@ import pkg from "../../package.json";
 const CONFIG_DIR = process.env.MESHTERM_CONFIG_DIR ?? join(process.env.HOME ?? "~", ".meshterm");
 // Profile resolved after parseArgs below
 let CONFIG_FILE = join(CONFIG_DIR, "config.json");
-const DAEMON_PID_FILE = join(CONFIG_DIR, "daemon.pid");
-const DAEMON_LOG_FILE = join(CONFIG_DIR, "daemon.log");
-const DAEMON_INFO_FILE = join(CONFIG_DIR, "daemon.json");
+let DAEMON_PID_FILE = join(CONFIG_DIR, "daemon.pid");
+let DAEMON_LOG_FILE = join(CONFIG_DIR, "daemon.log");
+let DAEMON_INFO_FILE = join(CONFIG_DIR, "daemon.json");
 
 interface Config {
   server: string;
@@ -265,6 +265,9 @@ const { values: args, positionals } = parseArgs({
 const PROFILE = args.profile ?? process.env.MESHTERM_PROFILE;
 if (PROFILE) {
   CONFIG_FILE = join(CONFIG_DIR, "profiles", `${PROFILE}.json`);
+  DAEMON_PID_FILE = join(CONFIG_DIR, `daemon-${PROFILE}.pid`);
+  DAEMON_LOG_FILE = join(CONFIG_DIR, `daemon-${PROFILE}.log`);
+  DAEMON_INFO_FILE = join(CONFIG_DIR, `daemon-${PROFILE}.json`);
 }
 
 const [command, ...rest] = positionals;
