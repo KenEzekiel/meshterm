@@ -2,6 +2,45 @@
 
 All notable changes to meshterm will be documented in this file.
 
+## [0.19.0] - 2026-05-04
+
+### Added
+- `meshterm setup --profile <name>` adds a separate MCP entry (`meshterm-<profile>`) without touching the default
+- `--as` flag to customize MCP entry name (`meshterm setup kiro --profile test --as meshterm-cloud`)
+- MCP tool responses prefixed with `[profile]` when using a non-default profile — AI can distinguish which server each tool connects to
+
+## [0.18.0] - 2026-05-03
+
+### Fixed
+- `MESHTERM_PROFILE` now flows to tmux session via `-e` flag — MCP inside the agent uses the correct profile's server
+- Before: daemon connected to right server, MCP replied to wrong server. Now both use the correct profile.
+
+## [0.17.1] - 2026-05-01
+
+### Fixed
+- Pass CLI command directly to `tmux new-session` instead of `send-keys` — fixes terminal handling issues with TUI applications
+
+## [0.17.0] - 2026-04-30
+
+### Added
+- Agent state tracks `profile` field — `meshterm agent list` shows profile per agent
+- `meshterm --profile <name> agent list` filters to only that profile's agents
+- `--session` defaults to `--name` in `meshterm agent start` (no longer required)
+
+## [0.16.0] - 2026-04-30
+
+### Added
+- **Named profiles** — `meshterm init --profile work` saves to `~/.meshterm/profiles/work.json`
+- `--profile` flag and `MESHTERM_PROFILE` env var for all commands and MCP
+- Overwrite guard on `meshterm init` — warns before replacing existing config
+- `--force` flag to skip the guard
+- `server_provisioned` telemetry event on `meshterm init` auto-provision
+- `docs/OPERATIONS.md` — update, restart, profiles, troubleshooting guide
+
+### Fixed
+- npm `bin` entry pointed to `.ts` file (npm silently stripped it). Created `bin/meshterm.mjs` wrapper.
+- Version display uses JSON import — no stale hardcoded fallback in compiled binary.
+
 ## [0.15.0] - 2026-04-30
 
 ### Added

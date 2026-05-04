@@ -103,7 +103,23 @@ meshterm init --profile personal  # provisions a free server
 meshterm status --profile work
 ```
 
-MCP agents use `MESHTERM_PROFILE` env var to select a profile.
+#### Connect IDE/CLI to a profile
+
+```bash
+meshterm setup kiro                        # default profile
+meshterm setup kiro --profile work         # adds "meshterm-work" MCP entry
+meshterm setup cursor --profile work       # same for Cursor
+```
+
+Both MCP entries coexist — the default `meshterm` and `meshterm-work` run side by side. Responses from non-default profiles are prefixed with `[profile]` so the AI knows which server it's talking to.
+
+#### Agents with profiles
+
+```bash
+meshterm agent start --profile work --name work-agent --cli "kiro-cli chat --classic"
+```
+
+The tmux session inherits the profile — daemon, CLI, and MCP all connect to the correct server.
 
 ## Hello World — Your First Message
 

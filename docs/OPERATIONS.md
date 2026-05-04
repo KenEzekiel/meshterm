@@ -83,13 +83,29 @@ meshterm send --profile work <to> <msg>
 
 Profiles are stored at `~/.meshterm/profiles/<name>.json`.
 
-MCP agents select a profile via env var:
+### Connect IDE/CLI to a profile
 
-```json
-{
-  "env": { "MESHTERM_PROFILE": "work" }
-}
+```bash
+# Adds "meshterm-work" MCP entry alongside the default "meshterm"
+meshterm setup kiro --profile work
+
+# Custom MCP entry name
+meshterm setup kiro --profile work --as meshterm-cloud
 ```
+
+Both entries coexist. Responses from non-default profiles are prefixed with `[profile]`.
+
+### Agents with profiles
+
+```bash
+meshterm agent start --profile work --name work-agent --cli "kiro-cli chat --classic"
+```
+
+The profile flows to the tmux session, CLI, and MCP automatically.
+
+### Switching profiles
+
+Re-run `meshterm setup` to change which profile an IDE uses. The previous entry is overwritten with the new profile.
 
 ## Troubleshooting
 
