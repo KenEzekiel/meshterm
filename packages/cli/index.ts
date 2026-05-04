@@ -255,6 +255,7 @@ const { values: args, positionals } = parseArgs({
     moderator: { type: "string" },
     limit: { type: "string" },
     profile: { type: "string" },
+    as: { type: "string" },
     force: { type: "boolean", default: false },
   },
   allowPositionals: true,
@@ -880,10 +881,13 @@ If you don't reply, the sender never sees your response.
         args: ["mcp"],
       },
     };
+    // Determine MCP entry name based on profile
+    const mcpEntryName = PROFILE ? (args.as ?? `meshterm-${PROFILE}`) : "meshterm";
     // Add agent name override for non-default agents
-    if (agentConfig.agentName) {
-      mcpConfig.meshterm.env = { MESHTERM_AGENT: agentConfig.agentName };
-    }
+    const env: Record<string, string> = {};
+    if (agentConfig.agentName) env.MESHTERM_AGENT = agentConfig.agentName;
+    if (PROFILE) env.MESHTERM_PROFILE = PROFILE;
+    if (Object.keys(env).length > 0) mcpConfig.meshterm.env = env;
     // VS Code requires type field
     if (agentConfig.mcpKey === "servers") {
       mcpConfig.meshterm.type = "stdio";
@@ -908,7 +912,7 @@ If you don't reply, the sender never sees your response.
       if (!existingMcpConfig[mcpKey]) {
         existingMcpConfig[mcpKey] = {};
       }
-      existingMcpConfig[mcpKey].meshterm = mcpConfig.meshterm;
+      existingMcpConfig[mcpKey][mcpEntryName] = mcpConfig.meshterm;
       writeFileSync(agentConfig.mcpPath, JSON.stringify(existingMcpConfig, null, 2));
       console.log(`✅ MCP config written to ${agentConfig.mcpPath}`);
 

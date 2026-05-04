@@ -543,6 +543,7 @@ async function handleRequest(req: JsonRpcRequest, config: Config): Promise<JsonR
       case "tools/call": {
         const { name, arguments: args } = params;
         const result = await handleToolCall(name, args, config);
+        const profileTag = PROFILE ? `[${PROFILE}] ` : "";
         return {
           jsonrpc: "2.0",
           id,
@@ -550,7 +551,7 @@ async function handleRequest(req: JsonRpcRequest, config: Config): Promise<JsonR
             content: [
               {
                 type: "text",
-                text: result,
+                text: profileTag + result,
               },
             ],
           },
