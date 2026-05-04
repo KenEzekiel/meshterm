@@ -936,13 +936,14 @@ If you don't reply, the sender never sees your response.
         tmuxSession = prompt(`Tmux session name for ${agentType}:`, agentType);
       }
       
+      const pf = PROFILE ? ` --profile ${PROFILE}` : "";
       if (tmuxSession) {
         console.log(`\n🚀 Starting daemon for ${config.agent}...`);
         try {
           startDaemon(config.agent, tmuxSession, config);
         } catch (err: any) {
           console.warn(`⚠️  Could not start daemon: ${err.message}`);
-          console.log("You can start it manually later with: meshterm daemon start --session <tmux-session>");
+          console.log(`You can start it manually later with: meshterm${pf} daemon start --session <tmux-session>`);
         }
       }
 
@@ -965,11 +966,11 @@ If you don't reply, the sender never sees your response.
         console.log("  1. Restart Gemini CLI to pick up the new MCP server");
       }
       
-      console.log(`  ${agentType === "kiro" || agentType === "claude" ? "3" : "2"}. Test with: meshterm agents`);
+      console.log(`  ${agentType === "kiro" || agentType === "claude" ? "3" : "2"}. Test with: meshterm${pf} agents`);
       
       if (tmuxSession) {
         console.log(`\n✅ Daemon is running in background (session: ${tmuxSession})`);
-        console.log(`   Check status: meshterm daemon status`);
+        console.log(`   Check status: meshterm${pf} daemon status`);
         console.log(`   View logs: tail -f ${DAEMON_LOG_FILE}`);
       }
     } catch (err: any) {
