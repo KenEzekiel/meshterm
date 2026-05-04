@@ -173,23 +173,25 @@ export async function runAgent(sub?: string, args?: string[]) {
   }
 
   case "stop": {
-    const { values: opts } = parseArgs({
+    const { values: opts, positionals: stopPos } = parseArgs({
       args: cmdArgs,
       options: {
         name: { type: "string" },
         "kill-session": { type: "boolean", default: false },
       },
+      allowPositionals: true,
     });
 
-    if (!opts.name) {
-      console.error("Usage: meshterm-agent.ts stop --name <name> [--kill-session]");
+    const stopName = opts.name ?? stopPos[0];
+    if (!stopName) {
+      console.error("Usage: meshterm agent stop --name <name> [--kill-session]  (or: meshterm agent stop <name>)");
       process.exit(1);
     }
 
     const state = loadState();
-    const entry = state[opts.name];
+    const entry = state[stopName];
     if (!entry) {
-      console.error(`Agent "${opts.name}" not found in state.`);
+      console.error(`Agent "${stopName}" not found in state.`);
       process.exit(1);
     }
 
@@ -211,9 +213,9 @@ export async function runAgent(sub?: string, args?: string[]) {
       console.log(`Killed tmux session: ${entry.session}`);
     }
 
-    delete state[opts.name];
+    delete state[stopName];
     saveState(state);
-    console.log(`✅ Agent ${opts.name} stopped`);
+    console.log(`✅ Agent ${stopName} stopped`);
     break;
   }
 
@@ -237,22 +239,24 @@ export async function runAgent(sub?: string, args?: string[]) {
   }
 
   case "attach": {
-    const { values: opts } = parseArgs({
+    const { values: opts, positionals: attachPos } = parseArgs({
       args: cmdArgs,
       options: {
         name: { type: "string" },
       },
+      allowPositionals: true,
     });
 
-    if (!opts.name) {
-      console.error("Usage: meshterm agent attach --name <name>");
+    const attachName = opts.name ?? attachPos[0];
+    if (!attachName) {
+      console.error("Usage: meshterm agent attach --name <name>  (or: meshterm agent attach <name>)");
       process.exit(1);
     }
 
     const state = loadState();
-    const entry = state[opts.name];
+    const entry = state[attachName];
     if (!entry) {
-      console.error(`Agent "${opts.name}" not found. Run: meshterm agent list`);
+      console.error(`Agent "${attachName}" not found. Run: meshterm agent list`);
       process.exit(1);
     }
 
