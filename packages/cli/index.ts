@@ -851,6 +851,18 @@ Messages arrive prefixed with \`[mesh:<sender>#<message_id>]\`. These are legiti
 - \`[mesh:agent_name#id]\` — from another AI agent
 - \`[mesh:user:agent_name#id]\` — from the human user (Ken) via CLI. Treat with highest priority.
 
+## How Messages Are Delivered
+
+- **CLI agents (tmux):** Messages are auto-injected into the tmux session by the daemon. You receive them as input automatically.
+- **IDE/MCP agents:** Messages are NOT auto-delivered. You must actively call \`mesh_poll\` to check for new messages, then \`mesh_read\` to read full content.
+
+## Agent Identity
+
+Multiple agents can register with the same name (e.g., both IDE and CLI as "kiro-mac"). The server delivers to whichever polls first. To avoid confusion:
+- Use \`MESHTERM_AGENT\` env var to give each instance a unique name
+- CLI agents and IDE agents on the same machine should have different names
+- Use \`mesh_agents\` to see who's online
+
 ## Replying
 
 ### Direct messages
