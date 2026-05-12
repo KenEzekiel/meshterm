@@ -398,6 +398,42 @@ switch (command) {
       console.log("📭 No unread messages");
     } else {
       for (const m of msgs) {
+        // Handle skill_transfer messages
+        try {
+          const parsed = JSON.parse(m.body);
+          if (parsed.type === "skill_transfer" && parsed.skill_name && parsed.files) {
+            const skillDir = join(process.env.HOME ?? "~", ".kiro/skills", parsed.skill_name);
+            if (!existsSync(skillDir)) mkdirSync(skillDir, { recursive: true });
+            for (const f of parsed.files) {
+              writeFileSync(join(skillDir, f.path), Buffer.from(f.content, "base64").toString("utf-8"));
+            }
+            console.log(`📦 Installed skill: ${parsed.skill_name} (${parsed.files.length} files) from ${m.from_agent}`);
+            await meshFetch(`/messages/${m.id}/read`, config, { method: "PATCH" });
+            continue;
+          }
+          if (parsed.type === "skill_request" && parsed.skill_name) {
+            // Auto-respond with skill files
+            const skillDir = join(process.env.HOME ?? "~", ".kiro/skills", parsed.skill_name);
+            if (existsSync(skillDir)) {
+              const { readdirSync } = await import("fs");
+              const fileList = readdirSync(skillDir).filter(f => !f.startsWith("."));
+              const files = fileList.map(f => ({
+                path: f,
+                content: Buffer.from(readFileSync(join(skillDir, f), "utf-8")).toString("base64"),
+              }));
+              const body = JSON.stringify({ type: "skill_transfer", skill_name: parsed.skill_name, files });
+              await meshFetch("/messages", config, {
+                method: "POST",
+                body: JSON.stringify({ from_agent: config.agent, to_agent: m.from_agent, body }),
+              });
+              console.log(`📤 Shared skill ${parsed.skill_name} → ${m.from_agent}`);
+            } else {
+              console.log(`⚠️  Skill requested but not found locally: ${parsed.skill_name}`);
+            }
+            await meshFetch(`/messages/${m.id}/read`, config, { method: "PATCH" });
+            continue;
+          }
+        } catch { /* not JSON, regular message */ }
         console.log(`📨 [${m.from_agent}] ${m.body}`);
         // Mark as read
         await meshFetch(`/messages/${m.id}/read`, config, { method: "PATCH" });
@@ -1015,6 +1051,98 @@ If you don't reply, the sender never sees your response.
     }
     const { runAgent } = await import("../agent/index.ts");
     await runAgent(agentSub, agentRest);
+    break;
+  }
+
+  case "skills": {
+    const config = loadConfig();
+    if (!config) { console.error("Not configured. Run: meshterm init"); process.exit(1); }
+    const [subcommand, ...skillRest] = rest;
+
+    if (subcommand === "announce") {
+      const name = skillRest[0];
+      if (!name) { console.error("Usage: meshterm skills announce <name>"); break; }
+      // Read SKILL.md frontmatter for description
+      const skillDir = join(process.env.HOME ?? "~", ".kiro/skills", name);
+      const skillFile = join(skillDir, "SKILL.md");
+      let description = args.description as string ?? "";
+      let files = ["SKILL.md"];
+      if (!description && existsSync(skillFile)) {
+        const content = readFileSync(skillFile, "utf-8");
+        const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+        if (fmMatch) {
+          const descMatch = fmMatch[1].match(/description:\s*[>|]?\s*\n?\s*(.+)/);
+          if (descMatch) description = descMatch[1].trim();
+        }
+        // Collect all files in the skill directory
+        const { readdirSync } = await import("fs");
+        files = readdirSync(skillDir).filter(f => !f.startsWith("."));
+      }
+      const res = await meshFetch("/skills", config, {
+        method: "POST",
+        body: JSON.stringify({ name, description, owner_agent: config.agent, files, tags: [] }),
+      });
+      console.log(`✓ Announced skill: ${name}`);
+      if (description) console.log(`  ${description}`);
+    } else if (subcommand === "list") {
+      const agent = skillRest[0];
+      const query = agent ? `?agent=${agent}` : "";
+      const res = await meshFetch(`/skills${query}`, config);
+      if (!res.length) { console.log("No skills found."); break; }
+      console.log(`${res.length} skill(s):\n`);
+      for (const s of res) {
+        console.log(`  ${s.name} (${s.owner_agent})`);
+        if (s.description) console.log(`    ${s.description}`);
+      }
+    } else if (subcommand === "search") {
+      const query = skillRest.join(" ");
+      if (!query) { console.error("Usage: meshterm skills search <query>"); break; }
+      const res = await meshFetch(`/skills?q=${encodeURIComponent(query)}`, config);
+      if (!res.length) { console.log("No skills match."); break; }
+      for (const s of res) {
+        console.log(`  ${s.name} (${s.owner_agent})`);
+        if (s.description) console.log(`    ${s.description}`);
+      }
+    } else if (subcommand === "share") {
+      const [name, target] = skillRest;
+      if (!name || !target) { console.error("Usage: meshterm skills share <name> <target>"); break; }
+      // Read skill files and send as skill_transfer message
+      const skillDir = join(process.env.HOME ?? "~", ".kiro/skills", name);
+      if (!existsSync(skillDir)) { console.error(`Skill not found locally: ${skillDir}`); break; }
+      const { readdirSync } = await import("fs");
+      const fileList = readdirSync(skillDir).filter(f => !f.startsWith("."));
+      const files = fileList.map(f => ({
+        path: f,
+        content: Buffer.from(readFileSync(join(skillDir, f), "utf-8")).toString("base64"),
+      }));
+      const body = JSON.stringify({ type: "skill_transfer", skill_name: name, files });
+      await meshFetch("/messages", config, {
+        method: "POST",
+        body: JSON.stringify({ from_agent: config.agent, to_agent: target, body }),
+      });
+      console.log(`✓ Shared ${name} (${fileList.length} files) → ${target}`);
+    } else if (subcommand === "install") {
+      const name = skillRest[0];
+      if (!name) { console.error("Usage: meshterm skills install <name>"); break; }
+      // Get skill metadata
+      const skill = await meshFetch(`/skills/${encodeURIComponent(name)}`, config);
+      if (skill.error) { console.error(`Skill not found: ${name}`); break; }
+      // Request files from owner via message
+      const requestBody = JSON.stringify({ type: "skill_request", skill_name: name });
+      await meshFetch("/messages", config, {
+        method: "POST",
+        body: JSON.stringify({ from_agent: config.agent, to_agent: skill.owner_agent, body: requestBody }),
+      });
+      console.log(`✓ Requested ${name} from ${skill.owner_agent}`);
+      console.log(`  Waiting for skill_transfer message... (run 'meshterm poll' to receive)`);
+    } else if (subcommand === "remove") {
+      const name = skillRest[0];
+      if (!name) { console.error("Usage: meshterm skills remove <name>"); break; }
+      await meshFetch(`/skills/${encodeURIComponent(name)}`, config, { method: "DELETE" });
+      console.log(`✓ Removed ${name} from index`);
+    } else {
+      console.log(`Usage: meshterm skills <announce|list|search|share|install|remove>`);
+    }
     break;
   }
 

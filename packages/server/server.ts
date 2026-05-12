@@ -192,6 +192,15 @@ interface RoomMessage {
   created_at: string;
 }
 
+interface Skill {
+  name: string;
+  description: string;
+  owner_agent: string;
+  files: string[];
+  tags: string[];
+  announced_at: string;
+}
+
 // --- State ---
 
 let messages: Message[] = [];
@@ -199,6 +208,7 @@ let agents: Map<string, Agent> = new Map();
 let roles: Map<string, Role> = new Map();
 let rooms: Map<string, Room> = new Map();
 let roomMessages: RoomMessage[] = [];
+let skills: Map<string, Skill> = new Map();
 
 // Load from disk
 if (existsSync(STORE_PATH)) {
@@ -209,7 +219,8 @@ if (existsSync(STORE_PATH)) {
     for (const r of data.roles ?? []) roles.set(r.name, r);
     for (const room of data.rooms ?? []) rooms.set(room.name, room);
     roomMessages = data.roomMessages ?? [];
-    console.log(`Loaded ${messages.length} messages, ${agents.size} agents, ${roles.size} roles, ${rooms.size} rooms, ${roomMessages.length} room messages`);
+    for (const s of data.skills ?? []) skills.set(s.name, s);
+    console.log(`Loaded ${messages.length} messages, ${agents.size} agents, ${roles.size} roles, ${rooms.size} rooms, ${roomMessages.length} room messages, ${skills.size} skills`);
   } catch {
     console.log("Fresh start — no valid store found");
   }
@@ -224,7 +235,8 @@ function persist() {
         agents: [...agents.values()],
         roles: [...roles.values()],
         rooms: [...rooms.values()],
-        roomMessages: roomMessages.slice(-MAX_MESSAGES)
+        roomMessages: roomMessages.slice(-MAX_MESSAGES),
+        skills: [...skills.values()],
       },
       null,
       2
@@ -774,6 +786,56 @@ Bun.serve({
         .filter(m => m.room === name)
         .slice(-limit);
       return json(result);
+    }
+
+    // --- Skills ---
+
+    // POST /skills — announce a skill
+    if (method === "POST" && path === "/skills") {
+      const body = await req.json();
+      if (!body.name || !body.owner_agent) return json({ error: "name and owner_agent required" }, 400);
+      const skill: Skill = {
+        name: body.name,
+        description: body.description ?? "",
+        owner_agent: body.owner_agent,
+        files: body.files ?? ["SKILL.md"],
+        tags: body.tags ?? [],
+        announced_at: new Date().toISOString(),
+      };
+      skills.set(skill.name, skill);
+      persist();
+      return json({ ok: true, skill });
+    }
+
+    // GET /skills — list/search skills
+    if (method === "GET" && path === "/skills") {
+      const agent = url.searchParams.get("agent");
+      const q = url.searchParams.get("q");
+      let result = [...skills.values()];
+      if (agent) result = result.filter(s => s.owner_agent === agent);
+      if (q) {
+        const lower = q.toLowerCase();
+        result = result.filter(s => s.name.toLowerCase().includes(lower) || s.description.toLowerCase().includes(lower) || s.tags.some(t => t.toLowerCase().includes(lower)));
+      }
+      return json(result);
+    }
+
+    // GET /skills/:name — get skill metadata
+    const skillGetMatch = path.match(/^\/skills\/([^/]+)$/);
+    if (method === "GET" && skillGetMatch) {
+      const name = decodeURIComponent(skillGetMatch[1]);
+      const skill = skills.get(name);
+      if (!skill) return json({ error: "skill not found" }, 404);
+      return json(skill);
+    }
+
+    // DELETE /skills/:name — remove from index
+    if (method === "DELETE" && skillGetMatch) {
+      const name = decodeURIComponent(skillGetMatch[1]);
+      if (!skills.has(name)) return json({ error: "skill not found" }, 404);
+      skills.delete(name);
+      persist();
+      return json({ ok: true });
     }
 
     return json({ error: "not found" }, 404);
