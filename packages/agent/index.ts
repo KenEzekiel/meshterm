@@ -270,11 +270,52 @@ export async function runAgent(sub?: string, args?: string[]) {
     process.exit(result.exitCode ?? 0);
   }
 
+  case "register": {
+    const { values: opts } = parseArgs({
+      args: cmdArgs,
+      options: {
+        name: { type: "string" },
+        type: { type: "string", default: "worker" },
+        host: { type: "string", default: "remote" },
+        delivery: { type: "string", default: "poll" },
+        "webhook-url": { type: "string" },
+        "webhook-secret": { type: "string" },
+      },
+    });
+
+    const name = opts.name;
+    if (!name) {
+      console.error("Usage: meshterm agent register --name <name> [--delivery webhook --webhook-url <url>] [--webhook-secret <secret>]");
+      process.exit(1);
+    }
+
+    const mesh = meshConfig?.server ?? "http://localhost:4200";
+    const secret = meshConfig?.secret ?? process.env.MESH_SECRET ?? "";
+    const payload: Record<string, string> = { name, type: opts.type as string, host: opts.host as string };
+    if (opts.delivery) payload.delivery_method = opts.delivery as string;
+    if (opts["webhook-url"]) payload.webhook_url = opts["webhook-url"] as string;
+    if (opts["webhook-secret"]) payload.webhook_secret = opts["webhook-secret"] as string;
+
+    const res = await fetch(`${mesh}/agents/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-mesh-secret": secret },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      console.log(`✅ Registered ${name} (delivery: ${opts.delivery}${opts["webhook-url"] ? `, url: ${opts["webhook-url"]}` : ""})`);
+    } else {
+      console.error(`❌ ${data.error}`);
+    }
+    break;
+  }
+
   default:
-    console.log("Usage: meshterm agent <start|stop|list|attach>");
-    console.log("  start   --name <name> --cli <command> --session <session> [--mesh <url>] [--secret <secret>]");
-    console.log("  stop    --name <name> [--kill-session]");
-    console.log("  attach  --name <name>");
+    console.log("Usage: meshterm agent <start|stop|list|attach|register>");
+    console.log("  start    --name <name> --cli <command> --session <session> [--mesh <url>] [--secret <secret>]");
+    console.log("  stop     --name <name> [--kill-session]");
+    console.log("  attach   --name <name>");
+    console.log("  register --name <name> [--delivery webhook --webhook-url <url>] [--webhook-secret <secret>]");
     console.log("  list");
   }
 }

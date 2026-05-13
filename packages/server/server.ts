@@ -134,6 +134,23 @@ if (process.env.MESH_WEBHOOKS) {
 }
 
 async function fireWebhook(agent: string, msg: Message) {
+  // 1. Check per-agent delivery config
+  const agentObj = agents.get(agent);
+  if (agentObj?.delivery_method === "webhook" && agentObj.webhook_url) {
+    const payload = JSON.stringify({
+      id: msg.id,
+      from: msg.from_agent,
+      to: msg.to_agent,
+      body: msg.body,
+      timestamp: msg.created_at,
+      in_reply_to: msg.reply_to ?? null,
+    });
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (agentObj.webhook_secret) headers["Authorization"] = `Bearer ${agentObj.webhook_secret}`;
+    deliverWithRetry(agentObj.webhook_url, headers, payload, agent, msg.id);
+  }
+
+  // 2. Config-file webhooks (existing behavior)
   const hook = WEBHOOKS.get(agent);
   if (!hook) return;
   const adapter = webhookAdapters[hook.format] ?? webhookAdapters.raw;
@@ -143,6 +160,21 @@ async function fireWebhook(agent: string, msg: Message) {
   } catch (err: any) {
     console.error(`Webhook failed for ${agent}: ${err.message}`);
   }
+}
+
+async function deliverWithRetry(url: string, headers: Record<string, string>, body: string, agent: string, msgId: string) {
+  const delays = [0, 10_000, 30_000, 60_000]; // immediate, 10s, 30s, 60s
+  for (let attempt = 0; attempt < delays.length; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, delays[attempt]));
+    try {
+      const res = await fetch(url, { method: "POST", headers, body });
+      if (res.ok || (res.status >= 200 && res.status < 500)) return; // success or client error (don't retry 4xx)
+      console.error(`Webhook ${agent} attempt ${attempt + 1}: HTTP ${res.status}`);
+    } catch (err: any) {
+      console.error(`Webhook ${agent} attempt ${attempt + 1}: ${err.message}`);
+    }
+  }
+  console.error(`Webhook delivery failed for ${agent} msg ${msgId} after ${delays.length} attempts`);
 }
 
 // --- Types ---
@@ -165,6 +197,9 @@ interface Agent {
   type: string; // "openclaw" | "kiro" | "claude-code" | etc
   host: string; // "vps" | "macbook" | etc
   last_seen: string;
+  delivery_method?: "poll" | "webhook";
+  webhook_url?: string;
+  webhook_secret?: string;
 }
 
 interface Role {
@@ -321,7 +356,7 @@ Bun.serve({
 
     // --- Agents ---
 
-    // POST /agents/register { name, type, host }
+    // POST /agents/register { name, type, host, delivery_method?, webhook_url?, webhook_secret? }
     if (method === "POST" && path === "/agents/register") {
       const body = await req.json();
       const agent: Agent = {
@@ -329,6 +364,9 @@ Bun.serve({
         type: body.type ?? "unknown",
         host: body.host ?? "unknown",
         last_seen: new Date().toISOString(),
+        ...(body.delivery_method ? { delivery_method: body.delivery_method } : {}),
+        ...(body.webhook_url ? { webhook_url: body.webhook_url } : {}),
+        ...(body.webhook_secret ? { webhook_secret: body.webhook_secret } : {}),
       };
       agents.set(agent.name, agent);
       persist();
@@ -339,6 +377,22 @@ Bun.serve({
     // GET /agents
     if (method === "GET" && path === "/agents") {
       return json([...agents.values()]);
+    }
+
+    // PATCH /agents/:name — update delivery config
+    const agentPatchMatch = path.match(/^\/agents\/([^/]+)$/);
+    if (method === "PATCH" && agentPatchMatch) {
+      const name = decodeURIComponent(agentPatchMatch[1]);
+      const agent = agents.get(name);
+      if (!agent) return json({ error: "agent not found" }, 404);
+      const body = await req.json();
+      if (body.delivery_method !== undefined) agent.delivery_method = body.delivery_method;
+      if (body.webhook_url !== undefined) agent.webhook_url = body.webhook_url;
+      if (body.webhook_secret !== undefined) agent.webhook_secret = body.webhook_secret;
+      if (body.type !== undefined) agent.type = body.type;
+      if (body.host !== undefined) agent.host = body.host;
+      persist();
+      return json({ ok: true, agent });
     }
 
     // POST /agents/heartbeat { name }

@@ -1190,6 +1190,7 @@ TOOLS
 AGENT LIFECYCLE
   agent start --name <n> --cli <cmd> [--session <tmux>]   Start agent (tmux + CLI + mesh-client)
   agent stop --name <n> [--kill-session]                 Stop agent cleanly
+  agent register --name <n> [--delivery webhook ...]     Register agent with delivery config
   agent list                                             Show running agents with status
 
 FLAGS
