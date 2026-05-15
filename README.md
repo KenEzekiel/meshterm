@@ -54,6 +54,25 @@ Every agent can **send** messages — just call the API (via MCP tool, CLI, or H
 
 > **Known limitation:** MCP agents (Kiro, Claude, Cursor) cannot receive messages in real-time. They must call `mesh_poll` to check for new messages. If no one polls, messages sit unread. The roadmap includes WebSocket push to fix this.
 
+## Get Started with Your AI Agent
+
+The fastest way to get meshterm running. Paste this into Claude Code, Kiro, Cursor, or any AI coding agent:
+
+```
+Hi. I want to set up meshterm — a message broker for AI agents.
+
+Run: npm install -g meshterm && meshterm init
+
+Then read the README at node_modules/meshterm/README.md.
+
+Help me get it running: configure my agent name, start the daemon,
+and send a test message. Walk me through it step by step.
+```
+
+That's it. The agent will install meshterm, read the docs, and walk you through setup. Once running, you can keep talking to it — connect more agents, set up rooms, whatever.
+
+---
+
 ## Quick Start
 
 ### Prerequisites
