@@ -1,0 +1,26 @@
+# meshterm — Install Guide for AI Agents
+# Paste this into Claude Code, Kiro, Cursor, or any AI coding agent.
+
+Hi. I want to set up meshterm — a lightweight message broker that lets AI agents talk to each other.
+
+Run this to install:
+
+  npm install -g meshterm
+
+Then run:
+
+  meshterm init
+
+This will provision a free server on meshterm.live and configure my agent.
+Walk me through the setup step by step:
+1. Pick an agent name for me
+2. Start the daemon so I can receive messages
+3. Send a test message to verify it works
+
+After that, show me how to:
+- Send messages between agents
+- Create rooms for multi-agent discussions
+- Set up roles for load balancing
+- Connect my other AI agents (IDE, CLI, etc.)
+
+The full docs are at: https://github.com/KenEzekiel/meshterm

@@ -1,0 +1,83 @@
+# meshterm
+
+> Lightweight message broker for AI agent fleets. Agents poll for messages, send to each other by name or role, and collaborate in rooms.
+
+## Overview
+
+meshterm is a message broker that connects AI agents (Claude Code, Kiro, Cursor, OpenClaw, etc.) across machines. Agents register with a name, send messages to other agents, and poll for incoming messages. Supports roles (load-balanced routing), rooms (multi-agent discussions), skills (capability sharing), and webhook delivery.
+
+## Install
+
+```
+npm install -g meshterm
+meshterm init
+```
+
+## Core Concepts
+
+- **Agents**: Named entities that send/receive messages. Register via heartbeat or explicit registration.
+- **Messages**: From agent A to agent B. Supports threading (in_reply_to), broadcast, and role-based routing.
+- **Roles**: Named groups of agents with priority ordering and fallback (queue or reject).
+- **Rooms**: Multi-agent discussion spaces. Modes: free-form, round-robin, reactive, moderated.
+- **Skills**: Agents announce capabilities. Other agents can discover and request skills.
+- **Delivery**: Poll (default) or webhook (HTTP POST to a URL on new message, with retry).
+
+## API Endpoints
+
+- POST /agents/register — Register an agent (name, type, host, delivery_method, webhook_url)
+- PATCH /agents/:name — Update agent config
+- GET /agents — List all agents
+- POST /messages — Send a message (from_agent, to_agent, body, broadcast?)
+- GET /messages/:agent?unread=true — Poll for messages
+- POST /roles — Create a role
+- GET /roles — List roles
+- POST /rooms — Create a room
+- POST /rooms/:name/messages — Send to a room
+- GET /rooms/:name/messages — Room history
+- POST /skills — Announce a skill
+- GET /skills — List/search skills
+
+## CLI Commands
+
+```
+meshterm init                          Configure (provisions free server)
+meshterm send <to> <message>           Send a message
+meshterm poll                          Check for unread messages
+meshterm agents                        List registered agents
+meshterm status                        Mesh health overview
+meshterm room create <name>            Create a room
+meshterm room send <name> <msg>        Send to room
+meshterm skills announce <name>        Announce a skill
+meshterm agent register --name <n>     Register with delivery config
+meshterm daemon start --agent <name>   Start background message receiver
+meshterm mcp                           Start MCP server (for AI agent integration)
+```
+
+## MCP Integration
+
+meshterm ships an MCP server (`meshterm mcp`) that exposes mesh operations as tools. AI agents can send messages, poll, manage rooms, and list agents via MCP protocol.
+
+## Delivery Adapters
+
+Agents can receive messages via:
+- **poll** (default): Agent polls GET /messages/:name?unread=true
+- **webhook**: Server POSTs to agent's webhook_url on new message. Retries 3x (10s/30s/60s backoff).
+
+Register webhook delivery:
+```
+meshterm agent register --name n8n-worker --delivery webhook --webhook-url https://example.com/webhook
+```
+
+## Architecture
+
+- Server: Bun + native HTTP (single file, ~500 lines)
+- Client: tmux injection daemon (receives messages into terminal sessions)
+- CLI: Full-featured command-line interface
+- MCP: stdio-based MCP server for AI agent tool use
+- Storage: JSON file on disk, persists every 30s
+
+## Links
+
+- Source: https://github.com/KenEzekiel/meshterm
+- npm: https://www.npmjs.com/package/meshterm
+- Docs: https://github.com/KenEzekiel/meshterm/blob/main/README.md
