@@ -84,6 +84,8 @@ async function pollAndInject() {
       if (tmuxSend(SESSION, injected)) {
         // Success — mark as read immediately
         await meshFetch(`/messages/${msg.id}/read`, { method: "PATCH" });
+        lastTaskInjectedAt = Date.now();
+        lastOutputChangeAt = Date.now();
         console.log(`📨 Injected + read: ${msg.from_agent}: ${msg.body.slice(0, 60)}...`);
       } else {
         // Failed to inject — add to retry queue, DON'T mark read
@@ -120,9 +122,85 @@ async function pollAndInject() {
   }
 }
 
+// --- State Detection ---
+const STUCK_TIMEOUT_MS = Number(process.env.MESH_CLIENT_STUCK_TIMEOUT ?? 600_000); // 10 min default
+const STATE_POLL_MS = 20_000; // check tmux every 20s
+const STATE_NOTIFY_TO = process.env.MESH_CLIENT_NOTIFY ?? "kaze";
+
+type AgentState = "idle" | "working" | "stuck";
+let currentState: AgentState = "idle";
+let lastOutputHash = "";
+let lastTaskInjectedAt = 0;
+let lastOutputChangeAt = Date.now();
+
+function tmuxCapture(session: string): string {
+  const result = Bun.spawnSync(["tmux", "capture-pane", "-t", session, "-p", "-l", "30"]);
+  if (result.exitCode !== 0) return "";
+  return result.stdout.toString();
+}
+
+function simpleHash(s: string): string {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return h.toString(36);
+}
+
+function detectState(output: string): AgentState {
+  const lines = output.trim().split("\n");
+  const lastLines = lines.slice(-5).join("\n");
+  // Idle: prompt visible at bottom (❯, %, $, or "Human:" for kiro-cli)
+  if (/[❯%$]\s*$/.test(lastLines) || /Human:\s*$/.test(lastLines)) return "idle";
+  return "working";
+}
+
+async function notifyStateChange(newState: AgentState) {
+  try {
+    await meshFetch("/messages", {
+      method: "POST",
+      body: JSON.stringify({
+        from_agent: AGENT,
+        to_agent: STATE_NOTIFY_TO,
+        body: `[state] ${AGENT}: ${newState}${newState === "stuck" ? ` (no output for ${Math.round(STUCK_TIMEOUT_MS / 60000)} min after task)` : ""}`,
+      }),
+    });
+    console.log(`📡 State → ${newState} (notified ${STATE_NOTIFY_TO})`);
+  } catch (e: any) {
+    console.error(`State notify failed: ${e.message}`);
+  }
+}
+
+async function checkState() {
+  const output = tmuxCapture(SESSION);
+  if (!output) return;
+
+  const hash = simpleHash(output);
+  const now = Date.now();
+
+  // Track output changes
+  if (hash !== lastOutputHash) {
+    lastOutputHash = hash;
+    lastOutputChangeAt = now;
+  }
+
+  // Detect current state
+  let detected = detectState(output);
+
+  // Check for stuck: working but no output change for STUCK_TIMEOUT_MS after a task was sent
+  if (detected === "working" && lastTaskInjectedAt > 0 && (now - lastOutputChangeAt) > STUCK_TIMEOUT_MS) {
+    detected = "stuck";
+  }
+
+  // Only notify on state change
+  if (detected !== currentState) {
+    currentState = detected;
+    await notifyStateChange(detected);
+  }
+}
+
 // --- Start ---
-console.log(`🕸️  Mesh Client v3.1 (inject + retry on failure) | agent=${AGENT} | session=${SESSION} | mesh=${MESH}`);
-console.log(`   Polling every ${POLL_MS}ms | Max ${MAX_RETRY} retries on inject failure`);
+console.log(`🕸️  Mesh Client v3.1 (inject + retry + state detection) | agent=${AGENT} | session=${SESSION} | mesh=${MESH}`);
+console.log(`   Polling every ${POLL_MS}ms | Max ${MAX_RETRY} retries | Stuck timeout: ${STUCK_TIMEOUT_MS / 60000}min | Notify: ${STATE_NOTIFY_TO}`);
 
 await register();
 setInterval(pollAndInject, POLL_MS);
+setInterval(checkState, STATE_POLL_MS);
