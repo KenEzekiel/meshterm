@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>meshterm — Architecture</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/geist@1/dist/fonts/geist-mono/style.css" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0a0a0f;--surface:#12121a;--text:#e4e4e7;--text-secondary:#a1a1aa;--text-tertiary:#71717a;--border:#27272a}
+html{font-family:'Sora',sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+body{min-height:100vh;padding:40px 32px}
+.layout{display:grid;grid-template-columns:1fr 320px;gap:40px;max-width:1600px;margin:0 auto}
+h1{font-size:30px;font-weight:700;letter-spacing:-0.5px}
+.desc{font-size:13px;color:var(--text-secondary);margin-top:12px}
+.legend{display:flex;flex-wrap:wrap;gap:16px;margin-top:24px}
+.legend-item{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-secondary)}
+.legend-dot{width:10px;height:10px;border-radius:3px}
+.diagram-wrap{position:relative;margin-top:32px;overflow-x:auto}
+.diagram{display:grid;grid-template-columns:repeat(6,1fr);gap:40px;position:relative;min-width:900px;padding-bottom:120px}
+.column{display:flex;flex-direction:column;gap:24px}
+.col-header{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;padding-bottom:12px;border-bottom:1px solid var(--border);margin-bottom:8px;font-family:'Geist Mono',monospace}
+.node{padding:12px 16px;border-radius:6px;border:1px solid;cursor:default;transition:opacity 200ms ease-out,border-color 200ms ease-out,box-shadow 200ms ease-out}
+.node.dimmed{opacity:0.3;pointer-events:none}
+.node:not(.dimmed):hover{box-shadow:0 0 12px var(--node-glow)}
+.node-name{font-family:'Geist Mono',monospace;font-size:13px;font-weight:500}
+.node-desc{font-size:11px;color:var(--text-secondary);margin-top:4px}
+svg.arrows{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.right-panel{position:sticky;top:40px;align-self:start}
+.section-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary);margin-bottom:12px;font-family:'Geist Mono',monospace}
+.flow-list{display:flex;flex-direction:column;gap:8px}
+.flow-item{padding:14px 16px;border-radius:8px;border:1px solid transparent;cursor:pointer;position:relative;transition:background 200ms ease-out,border-color 200ms ease-out;outline:none}
+.flow-item:hover{background:#1a1a24}
+.flow-item:focus-visible{outline:2px solid #60a5fa;outline-offset:2px}
+.flow-item.selected{border-color:var(--flow-color-border);background:var(--flow-color-bg)}
+.flow-item.selected::before{content:'';position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:2px;background:var(--flow-color)}
+.flow-name{font-size:13px;font-weight:500}
+.flow-desc{font-size:11px;color:var(--text-secondary);margin-top:4px}
+.steps-section{margin-top:40px}
+.steps-list{display:flex;flex-direction:column;gap:0}
+.step-item{display:flex;gap:12px;padding:8px 0;position:relative}
+.step-connector{position:absolute;left:11px;top:32px;bottom:-8px;width:1px;background:#27272a}
+.step-item:last-child .step-connector{display:none}
+.step-num{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Geist Mono',monospace;font-size:11px;font-weight:700;color:#fff;flex-shrink:0}
+.step-content{flex:1;min-width:0}
+.step-label{font-size:12px;font-weight:500}
+.step-desc{font-size:11px;color:var(--text-secondary);margin-top:2px}
+@media(max-width:1024px){
+  .layout{grid-template-columns:1fr;gap:32px}
+  .right-panel{position:static}
+}
+@media(max-width:768px){
+  body{padding:24px 16px}
+  .diagram{min-width:700px}
+  h1{font-size:24px}
+}
+@media(prefers-reduced-motion:reduce){
+  *{transition:none!important}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+<div class="left-panel">
+<h1>meshterm</h1>
+<p class="desc">Agent-agnostic communication layer for AI agents — message broker with roles, rooms, skills, and multi-transport delivery</p>
+<div class="legend" id="legend"></div>
+<div class="diagram-wrap">
+<div class="diagram" id="diagram"></div>
+<svg class="arrows" id="arrows"></svg>
+</div>
+</div>
+<div class="right-panel" role="navigation" aria-label="Architecture flows">
+<div class="section-title">Flows</div>
+<div class="flow-list" id="flow-list"></div>
+<div class="steps-section">
+<div class="section-title">Steps</div>
+<div class="steps-list" id="steps-list"></div>
+</div>
+</div>
+</div>
+<script>
+const data={"layers":[{"id":"actors","name":"Actors","color":"#c084fc"},{"id":"client","name":"Client","color":"#60a5fa"},{"id":"gateway","name":"API Gateway","color":"#34d399"},{"id":"services","name":"Services","color":"#fbbf24"},{"id":"data","name":"Data","color":"#f87171"},{"id":"external","name":"External","color":"#fb923c"}],"nodes":[{"id":"human-user","name":"Human User","description":"Developer using CLI or TUI to send/receive messages","layer":"actors"},{"id":"ai-agent","name":"AI Agent","description":"LLM-powered agent (Kiro, Claude, Cursor) using MCP tools","layer":"actors"},{"id":"cli","name":"CLI","description":"Unified CLI for init, send, poll, rooms, roles, skills, agent lifecycle","layer":"client"},{"id":"mcp-server","name":"MCP Server","description":"Model Context Protocol stdio server exposing mesh tools to AI agents","layer":"client"},{"id":"mesh-client","name":"Mesh Client","description":"Background daemon polling for messages and injecting into tmux sessions","layer":"client"},{"id":"tui","name":"TUI Dashboard","description":"Terminal UI for real-time agent monitoring and messaging","layer":"client"},{"id":"agent-lifecycle","name":"Agent Lifecycle","description":"Start/stop/attach agents with tmux sessions and mesh-client daemons","layer":"client"},{"id":"mesh-server","name":"Mesh Server","description":"Bun HTTP server — message broker with auth, routing, persistence","layer":"gateway"},{"id":"message-router","name":"Message Router","description":"Routes messages to agents, resolves roles, handles broadcast","layer":"services"},{"id":"role-resolver","name":"Role Resolver","description":"Resolves role:xxx addresses to online agents by priority/fallback","layer":"services"},{"id":"room-manager","name":"Room Manager","description":"Multi-agent rooms with modes: free-form, round-robin, reactive, moderated","layer":"services"},{"id":"skill-registry","name":"Skill Registry","description":"Announce, search, share, and install agent skills across the mesh","layer":"services"},{"id":"webhook-delivery","name":"Webhook Delivery","description":"Push messages to agents via webhooks with retry","layer":"services"},{"id":"json-store","name":"JSON Store","description":"File-based persistence for messages, agents, roles, rooms, skills","layer":"data"},{"id":"tmux","name":"tmux","description":"Terminal multiplexer used for message injection into agent sessions","layer":"external"},{"id":"webhooks","name":"Webhook Endpoints","description":"External services receiving push notifications (OpenClaw, Slack, Discord)","layer":"external"}],"flows":[{"id":"send-message","name":"Send Message","description":"Human or agent sends a direct message to another agent via CLI/MCP","steps":[{"order":1,"from":"human-user","to":"cli","label":"meshterm send <agent> <msg>","description":"User invokes CLI send command with target agent and message body"},{"order":2,"from":"cli","to":"mesh-server","label":"POST /messages","description":"CLI sends authenticated HTTP request with from_agent, to_agent, body"},{"order":3,"from":"mesh-server","to":"message-router","label":"Route message","description":"Server validates auth, checks if to_agent is role or direct, routes accordingly"},{"order":4,"from":"message-router","to":"json-store","label":"Persist message","description":"Message stored with state=queued, read=false, assigned unique ID"},{"order":5,"from":"message-router","to":"webhook-delivery","label":"Fire webhook","description":"If recipient has webhook config, push notification sent with retry"}]},{"id":"poll-messages","name":"Poll Messages","description":"Mesh client daemon polls for unread messages and injects into tmux","steps":[{"order":1,"from":"mesh-client","to":"mesh-server","label":"GET /messages/:agent?unread=true","description":"Client polls every N seconds for unread messages addressed to this agent"},{"order":2,"from":"mesh-server","to":"json-store","label":"Query unread","description":"Server filters messages by to_agent and read=false, marks state=fetched"},{"order":3,"from":"mesh-server","to":"mesh-client","label":"Return messages","description":"Array of unread messages returned to client"},{"order":4,"from":"mesh-client","to":"tmux","label":"tmux send-keys","description":"Client injects [mesh:sender#id] formatted message into tmux session"},{"order":5,"from":"mesh-client","to":"mesh-server","label":"PATCH /messages/:id/read","description":"On successful inject, client marks message as read. On failure, queues for retry."}]},{"id":"room-conversation","name":"Room Conversation","description":"Multi-agent discussion in a named room with mode enforcement","steps":[{"order":1,"from":"ai-agent","to":"mcp-server","label":"mesh_room_send(room, msg)","description":"Agent calls MCP tool to send message to a room"},{"order":2,"from":"mcp-server","to":"mesh-server","label":"POST /rooms/:name/messages","description":"MCP server forwards as authenticated HTTP request with from_agent and body"},{"order":3,"from":"mesh-server","to":"room-manager","label":"Enforce mode","description":"Room manager checks mode (round-robin turn, moderated permission, free-form)"},{"order":4,"from":"room-manager","to":"json-store","label":"Store room message + fan-out","description":"Room message stored, then direct messages created for each member (except sender)"},{"order":5,"from":"mesh-client","to":"tmux","label":"Inject [room:name] msg","description":"Each member's daemon picks up the fan-out message and injects into their session"}]},{"id":"skill-exchange","name":"Skill Exchange","description":"Agent announces a skill, another agent discovers and installs it","steps":[{"order":1,"from":"cli","to":"mesh-server","label":"POST /skills (announce)","description":"Owner announces skill with name, description, file list to the registry"},{"order":2,"from":"mesh-server","to":"skill-registry","label":"Register skill","description":"Skill metadata stored in registry, searchable by name/description/tags"},{"order":3,"from":"ai-agent","to":"cli","label":"meshterm skills install <name>","description":"Requesting agent looks up skill and sends skill_request message to owner"},{"order":4,"from":"cli","to":"mesh-server","label":"POST /messages (skill_request)","description":"Request message sent to skill owner agent"},{"order":5,"from":"mesh-client","to":"cli","label":"skill_transfer response","description":"Owner's client auto-responds with base64-encoded skill files, receiver installs to ~/.kiro/skills/"}]},{"id":"role-routing","name":"Role-Based Routing","description":"Message addressed to a role gets resolved to the best available agent","steps":[{"order":1,"from":"ai-agent","to":"mcp-server","label":"mesh_send(to: 'role:coder', msg)","description":"Agent sends message to a role instead of a specific agent name"},{"order":2,"from":"mcp-server","to":"mesh-server","label":"POST /messages (to_agent: role:coder)","description":"MCP forwards message with role:xxx as the to_agent field"},{"order":3,"from":"mesh-server","to":"role-resolver","label":"Resolve role","description":"Server detects role: prefix, invokes role resolver"},{"order":4,"from":"role-resolver","to":"json-store","label":"Check online agents","description":"Resolver checks which role agents have last_seen < 30s, follows priority order"},{"order":5,"from":"role-resolver","to":"message-router","label":"Deliver to resolved agent","description":"Message to_agent rewritten to resolved agent name (or queued if fallback=queue)"}]}]};
+
+const layerMap=Object.fromEntries(data.layers.map(l=>[l.id,l]));
+const nodeMap=Object.fromEntries(data.nodes.map(n=>[n.id,n]));
+let selectedFlow=null;
+const nodeEls={};
+
+// Build legend
+const legend=document.getElementById('legend');
+data.layers.forEach(l=>{
+  const d=document.createElement('div');d.className='legend-item';
+  d.innerHTML=`<span class="legend-dot" style="background:${l.color}"></span>${l.name}`;
+  legend.appendChild(d);
+});
+
+// Build diagram columns
+const diagram=document.getElementById('diagram');
+data.layers.forEach(layer=>{
+  const col=document.createElement('div');col.className='column';
+  const hdr=document.createElement('div');hdr.className='col-header';hdr.style.color=layer.color;hdr.textContent=layer.name;
+  col.appendChild(hdr);
+  data.nodes.filter(n=>n.layer===layer.id).forEach(node=>{
+    const el=document.createElement('div');el.className='node';el.id='node-'+node.id;
+    el.style.background=hexToRgba(layer.color,0.08);
+    el.style.borderColor=hexToRgba(layer.color,0.3);
+    el.style.setProperty('--node-glow',hexToRgba(layer.color,0.15));
+    el.innerHTML=`<div class="node-name">${node.name}</div><div class="node-desc">${node.description}</div>`;
+    col.appendChild(el);
+    nodeEls[node.id]=el;
+  });
+  diagram.appendChild(col);
+});
+
+// Build flow list
+const flowList=document.getElementById('flow-list');
+data.flows.forEach((flow,i)=>{
+  const el=document.createElement('div');el.className='flow-item';el.tabIndex=0;
+  el.setAttribute('role','button');el.setAttribute('aria-label',`Select flow: ${flow.name}`);
+  const srcNode=nodeMap[flow.steps[0].from];
+  const color=layerMap[srcNode.layer].color;
+  el.style.setProperty('--flow-color',color);
+  el.style.setProperty('--flow-color-bg',hexToRgba(color,0.1));
+  el.style.setProperty('--flow-color-border',hexToRgba(color,0.3));
+  el.innerHTML=`<div class="flow-name">${flow.name}</div><div class="flow-desc">${flow.description}</div>`;
+  el.addEventListener('click',()=>selectFlow(flow.id));
+  el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectFlow(flow.id)}});
+  flowList.appendChild(el);
+});
+
+function selectFlow(id){
+  selectedFlow=id;
+  const flow=data.flows.find(f=>f.id===id);
+  // Update flow list selection
+  document.querySelectorAll('.flow-item').forEach((el,i)=>{
+    el.classList.toggle('selected',data.flows[i].id===id);
+  });
+  // Dim/undim nodes
+  const activeNodes=new Set();
+  flow.steps.forEach(s=>{activeNodes.add(s.from);activeNodes.add(s.to)});
+  Object.entries(nodeEls).forEach(([nid,el])=>{
+    el.classList.toggle('dimmed',!activeNodes.has(nid));
+  });
+  // Update steps
+  renderSteps(flow);
+  // Redraw arrows
+  drawArrows(flow);
+}
+
+function renderSteps(flow){
+  const list=document.getElementById('steps-list');list.innerHTML='';
+  const srcNode=nodeMap[flow.steps[0].from];
+  const color=layerMap[srcNode.layer].color;
+  flow.steps.forEach((step,i)=>{
+    const el=document.createElement('div');el.className='step-item';
+    el.innerHTML=`
+      ${i<flow.steps.length-1?'<div class="step-connector"></div>':''}
+      <div class="step-num" style="background:${color}" aria-label="Step ${step.order}">${step.order}</div>
+      <div class="step-content">
+        <div class="step-label">${step.label}</div>
+        <div class="step-desc">${step.description}</div>
+      </div>`;
+    list.appendChild(el);
+  });
+}
+
+function drawArrows(flow){
+  const svg=document.getElementById('arrows');svg.innerHTML='';
+  const wrap=document.querySelector('.diagram-wrap');
+  const wrapRect=wrap.getBoundingClientRect();
+  const svgNS='http://www.w3.org/2000/svg';
+  // Detect duplicate paths
+  const pathCounts={};
+  const pathIndex={};
+  flow.steps.forEach(s=>{
+    const key=s.from+'->'+s.to;
+    pathCounts[key]=(pathCounts[key]||0)+1;
+  });
+  const pathCurrent={};
+
+  flow.steps.forEach((step)=>{
+    const fromEl=nodeEls[step.from];const toEl=nodeEls[step.to];
+    if(!fromEl||!toEl)return;
+    const fromRect=fromEl.getBoundingClientRect();
+    const toRect=toEl.getBoundingClientRect();
+    const fromLayer=data.layers.findIndex(l=>l.id===nodeMap[step.from].layer);
+    const toLayer=data.layers.findIndex(l=>l.id===nodeMap[step.to].layer);
+    const srcNode=nodeMap[step.from];
+    const color=layerMap[srcNode.layer].color;
+
+    const key=step.from+'->'+step.to;
+    const total=pathCounts[key];
+    pathCurrent[key]=(pathCurrent[key]||0)+1;
+    const idx=pathCurrent[key]-1;
+    const offset=total>1?(idx-(total-1)/2)*14:0;
+
+    let x1,y1,x2,y2,path;
+    const sameLayer=fromLayer===toLayer;
+    const backward=toLayer<fromLayer;
+
+    if(sameLayer){
+      // U-curve out right edge
+      x1=fromRect.right-wrapRect.left;
+      y1=fromRect.top+fromRect.height/2-wrapRect.top+offset;
+      x2=toRect.right-wrapRect.left;
+      y2=toRect.top+toRect.height/2-wrapRect.top+offset;
+      const arc=50;
+      path=`M${x1},${y1} C${x1+arc},${y1} ${x2+arc},${y2} ${x2},${y2}`;
+    }else if(backward){
+      // Dashed arc below
+      x1=fromRect.left-wrapRect.left;
+      y1=fromRect.top+fromRect.height/2-wrapRect.top+offset;
+      x2=toRect.right-wrapRect.left;
+      y2=toRect.top+toRect.height/2-wrapRect.top+offset;
+      const bottomY=Math.max(y1,y2)+100;
+      path=`M${x1},${y1} C${x1},${bottomY} ${x2},${bottomY} ${x2},${y2}`;
+    }else{
+      // Forward: right edge source → left edge target
+      x1=fromRect.right-wrapRect.left;
+      y1=fromRect.top+fromRect.height/2-wrapRect.top+offset;
+      x2=toRect.left-wrapRect.left;
+      y2=toRect.top+toRect.height/2-wrapRect.top+offset;
+      const cx1=x1+(x2-x1)*0.4;
+      const cx2=x1+(x2-x1)*0.6;
+      path=`M${x1},${y1} C${cx1},${y1} ${cx2},${y2} ${x2},${y2}`;
+    }
+
+    // Draw path
+    const p=document.createElementNS(svgNS,'path');
+    p.setAttribute('d',path);
+    p.setAttribute('fill','none');
+    p.setAttribute('stroke',hexToRgba(color,0.6));
+    p.setAttribute('stroke-width','1.5');
+    if(backward)p.setAttribute('stroke-dasharray','6 4');
+    // Arrowhead
+    const markerId='arrow-'+step.order+'-'+step.from;
+    const marker=document.createElementNS(svgNS,'marker');
+    marker.setAttribute('id',markerId);
+    marker.setAttribute('markerWidth','6');marker.setAttribute('markerHeight','6');
+    marker.setAttribute('refX','5');marker.setAttribute('refY','3');
+    marker.setAttribute('orient','auto');
+    const tri=document.createElementNS(svgNS,'polygon');
+    tri.setAttribute('points','0,0 6,3 0,6');
+    tri.setAttribute('fill',hexToRgba(color,0.6));
+    marker.appendChild(tri);
+    let defs=svg.querySelector('defs');
+    if(!defs){defs=document.createElementNS(svgNS,'defs');svg.appendChild(defs)}
+    defs.appendChild(marker);
+    p.setAttribute('marker-end',`url(#${markerId})`);
+    svg.appendChild(p);
+
+    // Number circle at midpoint
+    const midT=0.5;
+    const tempPath=document.createElementNS(svgNS,'path');
+    tempPath.setAttribute('d',path);
+    svg.appendChild(tempPath);
+    const len=tempPath.getTotalLength();
+    const pt=tempPath.getPointAtLength(len*midT);
+    svg.removeChild(tempPath);
+
+    const circleOffset=total>1?(idx-(total-1)/2)*24:0;
+    const g=document.createElementNS(svgNS,'g');
+    const circle=document.createElementNS(svgNS,'circle');
+    circle.setAttribute('cx',pt.x+circleOffset);circle.setAttribute('cy',pt.y-12);
+    circle.setAttribute('r','10');circle.setAttribute('fill',color);
+    const text=document.createElementNS(svgNS,'text');
+    text.setAttribute('x',pt.x+circleOffset);text.setAttribute('y',pt.y-8);
+    text.setAttribute('text-anchor','middle');text.setAttribute('fill','#fff');
+    text.setAttribute('font-family','Geist Mono, monospace');text.setAttribute('font-size','10');
+    text.setAttribute('font-weight','700');
+    text.textContent=step.order;
+    g.appendChild(circle);g.appendChild(text);svg.appendChild(g);
+  });
+}
+
+function hexToRgba(hex,a){
+  const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+  return`rgba(${r},${g},${b},${a})`;
+}
+
+// Auto-select first flow
+selectFlow(data.flows[0].id);
+// Redraw on resize
+window.addEventListener('resize',()=>{if(selectedFlow)drawArrows(data.flows.find(f=>f.id===selectedFlow))});
+</script>
+</body>
+</html>

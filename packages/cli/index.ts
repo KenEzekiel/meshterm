@@ -1146,6 +1146,55 @@ If you don't reply, the sender never sees your response.
     break;
   }
 
+  case "search": {
+    const config = loadConfig();
+    if (!config) { console.error("❌ Not configured. Run: meshterm init"); process.exit(1); }
+    const query = rest.join(" ");
+    if (!query) { console.error("Usage: meshterm search <query> [--from agent] [--since 7d]"); process.exit(1); }
+    const params = new URLSearchParams({ q: query, limit: "20" });
+    if (args.from) params.set("from", args.from as string);
+    if (args.since) params.set("since", args.since as string);
+    const results = await meshFetch(`/messages/search?${params}`, config);
+    if (!results.length) { console.log("No results"); break; }
+    console.log(`🔍 ${results.length} result(s):\n`);
+    for (const r of results) {
+      console.log(`  ${r.from_agent} → ${r.to_agent}  (${r.created_at})`);
+      console.log(`  ${r.body}\n`);
+    }
+    break;
+  }
+
+  case "tasks": {
+    const config = loadConfig();
+    if (!config) { console.error("❌ Not configured. Run: meshterm init"); process.exit(1); }
+    const params = new URLSearchParams();
+    if (args.since) params.set("since", args.since as string);
+    const tasks = await meshFetch(`/tasks?${params}`, config);
+    if (!tasks.length) { console.log("No tasks found"); break; }
+    console.log(`📋 ${tasks.length} task(s):\n`);
+    for (const t of tasks) {
+      console.log(`  ${t.taskId}`);
+      console.log(`    ${t.messages} messages, agents: ${t.agents.join(", ")}, phase: ${t.latestPhase || "unknown"}`);
+      console.log(`    ${t.started} → ${t.lastActivity}\n`);
+    }
+    break;
+  }
+
+  case "task": {
+    const config = loadConfig();
+    if (!config) { console.error("❌ Not configured. Run: meshterm init"); process.exit(1); }
+    const taskId = rest[0];
+    if (!taskId) { console.error("Usage: meshterm task <taskId>"); process.exit(1); }
+    const msgs = await meshFetch(`/tasks?taskId=${encodeURIComponent(taskId)}`, config);
+    if (!msgs.length) { console.log(`No messages for task: ${taskId}`); break; }
+    console.log(`📋 Task: ${taskId} (${msgs.length} messages)\n`);
+    for (const m of msgs) {
+      console.log(`  [${m.created_at}] ${m.from_agent} → ${m.to_agent}`);
+      console.log(`  ${m.body.slice(0, 120)}${m.body.length > 120 ? "..." : ""}\n`);
+    }
+    break;
+  }
+
   default:
     console.log(`meshterm v${pkg.version} — Agent-agnostic communication layer for AI agents
 

@@ -144,6 +144,7 @@ async function fireWebhook(agent: string, msg: Message) {
       body: msg.body,
       timestamp: msg.created_at,
       in_reply_to: msg.reply_to ?? null,
+      metadata: msg.metadata ?? null,
     });
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (agentObj.webhook_secret) headers["Authorization"] = `Bearer ${agentObj.webhook_secret}`;
@@ -186,6 +187,7 @@ interface Message {
   body: string;
   source?: string; // "room:<name>" if from a room message
   reply_to?: string; // message ID this is replying to
+  metadata?: Record<string, any>; // opaque client metadata (max 4KB)
   created_at: string;
   read: boolean;
   state: "queued" | "fetched";
@@ -465,6 +467,9 @@ Bun.serve({
       if (typeof body.body === "string" && body.body.length > 100_000) {
         return json({ error: "message body too large (max 100KB)" }, 413);
       }
+      if (body.metadata && JSON.stringify(body.metadata).length > 4096) {
+        return json({ error: "metadata too large (max 4KB)" }, 413);
+      }
 
       // Handle role-based addressing
       if (body.to_agent.startsWith("role:")) {
@@ -484,6 +489,7 @@ Bun.serve({
               from_agent: body.from_agent,
               to_agent: agentName,
               body: body.body,
+              ...(body.metadata ? { metadata: body.metadata } : {}),
               created_at: new Date().toISOString(),
               read: false,
               state: "queued",
@@ -522,6 +528,7 @@ Bun.serve({
           from_agent: body.from_agent,
           to_agent: resolution.agent,
           body: body.body,
+          ...(body.metadata ? { metadata: body.metadata } : {}),
           created_at: new Date().toISOString(),
           read: false,
           state: "queued",
@@ -553,6 +560,7 @@ Bun.serve({
         to_agent: body.to_agent,
         body: body.body,
         ...(body.reply_to ? { reply_to: body.reply_to } : {}),
+        ...(body.metadata ? { metadata: body.metadata } : {}),
         created_at: new Date().toISOString(),
         read: false,
         state: "queued",
@@ -890,6 +898,82 @@ Bun.serve({
       skills.delete(name);
       persist();
       return json({ ok: true });
+    }
+
+    // --- Search & Tasks ---
+
+    // GET /messages/search?q=<query>&from=<agent>&to=<agent>&since=<duration>&limit=<n>
+    if (method === "GET" && path === "/messages/search") {
+      const q = url.searchParams.get("q");
+      if (!q) return json({ error: "missing q parameter" }, 400);
+      const from = url.searchParams.get("from");
+      const to = url.searchParams.get("to");
+      const since = url.searchParams.get("since");
+      const limit = Number(url.searchParams.get("limit") ?? 20);
+      const qLower = q.toLowerCase();
+
+      let sinceDate: Date | null = null;
+      if (since) {
+        const match = since.match(/^(\d+)([dhm])$/);
+        if (match) {
+          const [, n, unit] = match;
+          const ms = unit === "d" ? 86400000 : unit === "h" ? 3600000 : 60000;
+          sinceDate = new Date(Date.now() - Number(n) * ms);
+        }
+      }
+
+      const results = messages.filter(m => {
+        if (from && m.from_agent !== from) return false;
+        if (to && m.to_agent !== to) return false;
+        if (sinceDate && new Date(m.created_at) < sinceDate) return false;
+        return m.body.toLowerCase().includes(qLower);
+      }).slice(-limit).map(m => ({
+        id: m.id,
+        from_agent: m.from_agent,
+        to_agent: m.to_agent,
+        body: m.body.length > 200 ? m.body.slice(0, 200) + "..." : m.body,
+        created_at: m.created_at,
+        metadata: m.metadata,
+      }));
+
+      return json(results);
+    }
+
+    // GET /tasks?since=<duration>
+    if (method === "GET" && path === "/tasks") {
+      const since = url.searchParams.get("since");
+      let sinceDate: Date | null = null;
+      if (since) {
+        const match = since.match(/^(\d+)([dhm])$/);
+        if (match) {
+          const [, n, unit] = match;
+          const ms = unit === "d" ? 86400000 : unit === "h" ? 3600000 : 60000;
+          sinceDate = new Date(Date.now() - Number(n) * ms);
+        }
+      }
+
+      const taskId = url.searchParams.get("taskId");
+      if (taskId) {
+        // Return all messages for a specific task
+        const taskMsgs = messages.filter(m => m.metadata?.taskId === taskId);
+        return json(taskMsgs);
+      }
+
+      // List distinct tasks
+      const tasks = new Map<string, { taskId: string; messages: number; agents: Set<string>; started: string; lastActivity: string; latestPhase?: string }>();
+      for (const m of messages) {
+        const tid = m.metadata?.taskId;
+        if (!tid) continue;
+        if (sinceDate && new Date(m.created_at) < sinceDate) continue;
+        if (!tasks.has(tid)) tasks.set(tid, { taskId: tid, messages: 0, agents: new Set(), started: m.created_at, lastActivity: m.created_at });
+        const t = tasks.get(tid)!;
+        t.messages++;
+        t.agents.add(m.from_agent);
+        if (m.created_at > t.lastActivity) t.lastActivity = m.created_at;
+        if (m.metadata?.taskPhase) t.latestPhase = m.metadata.taskPhase;
+      }
+
+      return json([...tasks.values()].map(t => ({ ...t, agents: [...t.agents] })));
     }
 
     return json({ error: "not found" }, 404);

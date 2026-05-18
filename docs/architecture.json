@@ -1,0 +1,363 @@
+{
+  "project": "meshterm",
+  "description": "Agent-agnostic communication layer for AI agents — message broker with roles, rooms, skills, and multi-transport delivery",
+  "generated_at": "2026-05-15T23:38:31.856+07:00",
+  "layers": [
+    {
+      "id": "actors",
+      "name": "Actors",
+      "color": "#c084fc"
+    },
+    {
+      "id": "client",
+      "name": "Client",
+      "color": "#60a5fa"
+    },
+    {
+      "id": "gateway",
+      "name": "API Gateway",
+      "color": "#34d399"
+    },
+    {
+      "id": "services",
+      "name": "Services",
+      "color": "#fbbf24"
+    },
+    {
+      "id": "data",
+      "name": "Data",
+      "color": "#f87171"
+    },
+    {
+      "id": "external",
+      "name": "External",
+      "color": "#fb923c"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "human-user",
+      "name": "Human User",
+      "description": "Developer using CLI or TUI to send/receive messages",
+      "layer": "actors",
+      "files": []
+    },
+    {
+      "id": "ai-agent",
+      "name": "AI Agent",
+      "description": "LLM-powered agent (Kiro, Claude, Cursor) using MCP tools",
+      "layer": "actors",
+      "files": []
+    },
+    {
+      "id": "cli",
+      "name": "CLI",
+      "description": "Unified CLI for init, send, poll, rooms, roles, skills, agent lifecycle",
+      "layer": "client",
+      "files": ["packages/cli/index.ts"]
+    },
+    {
+      "id": "mcp-server",
+      "name": "MCP Server",
+      "description": "Model Context Protocol stdio server exposing mesh tools to AI agents",
+      "layer": "client",
+      "files": ["packages/mcp/index.ts"]
+    },
+    {
+      "id": "mesh-client",
+      "name": "Mesh Client",
+      "description": "Background daemon polling for messages and injecting into tmux sessions",
+      "layer": "client",
+      "files": ["packages/client/mesh-client.ts"]
+    },
+    {
+      "id": "tui",
+      "name": "TUI Dashboard",
+      "description": "Terminal UI for real-time agent monitoring and messaging",
+      "layer": "client",
+      "files": ["packages/tui/index.ts"]
+    },
+    {
+      "id": "agent-lifecycle",
+      "name": "Agent Lifecycle",
+      "description": "Start/stop/attach agents with tmux sessions and mesh-client daemons",
+      "layer": "client",
+      "files": ["packages/agent/index.ts"]
+    },
+    {
+      "id": "mesh-server",
+      "name": "Mesh Server",
+      "description": "Bun HTTP server — message broker with auth, routing, persistence",
+      "layer": "gateway",
+      "files": ["packages/server/server.ts"]
+    },
+    {
+      "id": "message-router",
+      "name": "Message Router",
+      "description": "Routes messages to agents, resolves roles, handles broadcast",
+      "layer": "services",
+      "files": ["packages/server/server.ts"]
+    },
+    {
+      "id": "role-resolver",
+      "name": "Role Resolver",
+      "description": "Resolves role:xxx addresses to online agents by priority/fallback",
+      "layer": "services",
+      "files": ["packages/server/server.ts"]
+    },
+    {
+      "id": "room-manager",
+      "name": "Room Manager",
+      "description": "Multi-agent rooms with modes: free-form, round-robin, reactive, moderated",
+      "layer": "services",
+      "files": ["packages/server/server.ts"]
+    },
+    {
+      "id": "skill-registry",
+      "name": "Skill Registry",
+      "description": "Announce, search, share, and install agent skills across the mesh",
+      "layer": "services",
+      "files": ["packages/server/server.ts"]
+    },
+    {
+      "id": "webhook-delivery",
+      "name": "Webhook Delivery",
+      "description": "Push messages to agents via webhooks with retry (raw, OpenClaw, Slack, Discord)",
+      "layer": "services",
+      "files": ["packages/server/server.ts"]
+    },
+    {
+      "id": "json-store",
+      "name": "JSON Store",
+      "description": "File-based persistence for messages, agents, roles, rooms, skills",
+      "layer": "data",
+      "files": ["packages/server/server.ts"]
+    },
+    {
+      "id": "tmux",
+      "name": "tmux",
+      "description": "Terminal multiplexer used for message injection into agent sessions",
+      "layer": "external",
+      "files": []
+    },
+    {
+      "id": "webhooks",
+      "name": "Webhook Endpoints",
+      "description": "External services receiving push notifications (OpenClaw, Slack, Discord)",
+      "layer": "external",
+      "files": []
+    }
+  ],
+  "flows": [
+    {
+      "id": "send-message",
+      "name": "Send Message",
+      "description": "Human or agent sends a direct message to another agent via CLI/MCP",
+      "steps": [
+        {
+          "order": 1,
+          "from": "human-user",
+          "to": "cli",
+          "label": "meshterm send <agent> <msg>",
+          "description": "User invokes CLI send command with target agent and message body"
+        },
+        {
+          "order": 2,
+          "from": "cli",
+          "to": "mesh-server",
+          "label": "POST /messages",
+          "description": "CLI sends authenticated HTTP request with from_agent, to_agent, body"
+        },
+        {
+          "order": 3,
+          "from": "mesh-server",
+          "to": "message-router",
+          "label": "Route message",
+          "description": "Server validates auth, checks if to_agent is role or direct, routes accordingly"
+        },
+        {
+          "order": 4,
+          "from": "message-router",
+          "to": "json-store",
+          "label": "Persist message",
+          "description": "Message stored with state=queued, read=false, assigned unique ID"
+        },
+        {
+          "order": 5,
+          "from": "message-router",
+          "to": "webhook-delivery",
+          "label": "Fire webhook",
+          "description": "If recipient has webhook config, push notification sent with retry"
+        }
+      ]
+    },
+    {
+      "id": "poll-messages",
+      "name": "Poll Messages",
+      "description": "Mesh client daemon polls for unread messages and injects into tmux",
+      "steps": [
+        {
+          "order": 1,
+          "from": "mesh-client",
+          "to": "mesh-server",
+          "label": "GET /messages/:agent?unread=true",
+          "description": "Client polls every N seconds for unread messages addressed to this agent"
+        },
+        {
+          "order": 2,
+          "from": "mesh-server",
+          "to": "json-store",
+          "label": "Query unread",
+          "description": "Server filters messages by to_agent and read=false, marks state=fetched"
+        },
+        {
+          "order": 3,
+          "from": "mesh-server",
+          "to": "mesh-client",
+          "label": "Return messages",
+          "description": "Array of unread messages returned to client"
+        },
+        {
+          "order": 4,
+          "from": "mesh-client",
+          "to": "tmux",
+          "label": "tmux send-keys",
+          "description": "Client injects [mesh:sender#id] formatted message into tmux session"
+        },
+        {
+          "order": 5,
+          "from": "mesh-client",
+          "to": "mesh-server",
+          "label": "PATCH /messages/:id/read",
+          "description": "On successful inject, client marks message as read. On failure, queues for retry."
+        }
+      ]
+    },
+    {
+      "id": "room-conversation",
+      "name": "Room Conversation",
+      "description": "Multi-agent discussion in a named room with mode enforcement",
+      "steps": [
+        {
+          "order": 1,
+          "from": "ai-agent",
+          "to": "mcp-server",
+          "label": "mesh_room_send(room, msg)",
+          "description": "Agent calls MCP tool to send message to a room"
+        },
+        {
+          "order": 2,
+          "from": "mcp-server",
+          "to": "mesh-server",
+          "label": "POST /rooms/:name/messages",
+          "description": "MCP server forwards as authenticated HTTP request with from_agent and body"
+        },
+        {
+          "order": 3,
+          "from": "mesh-server",
+          "to": "room-manager",
+          "label": "Enforce mode",
+          "description": "Room manager checks mode (round-robin turn, moderated permission, free-form)"
+        },
+        {
+          "order": 4,
+          "from": "room-manager",
+          "to": "json-store",
+          "label": "Store room message + fan-out",
+          "description": "Room message stored, then direct messages created for each member (except sender)"
+        },
+        {
+          "order": 5,
+          "from": "mesh-client",
+          "to": "tmux",
+          "label": "Inject [room:name] msg",
+          "description": "Each member's daemon picks up the fan-out message and injects into their session"
+        }
+      ]
+    },
+    {
+      "id": "skill-exchange",
+      "name": "Skill Exchange",
+      "description": "Agent announces a skill, another agent discovers and installs it",
+      "steps": [
+        {
+          "order": 1,
+          "from": "cli",
+          "to": "mesh-server",
+          "label": "POST /skills (announce)",
+          "description": "Owner announces skill with name, description, file list to the registry"
+        },
+        {
+          "order": 2,
+          "from": "mesh-server",
+          "to": "skill-registry",
+          "label": "Register skill",
+          "description": "Skill metadata stored in registry, searchable by name/description/tags"
+        },
+        {
+          "order": 3,
+          "from": "ai-agent",
+          "to": "cli",
+          "label": "meshterm skills install <name>",
+          "description": "Requesting agent looks up skill and sends skill_request message to owner"
+        },
+        {
+          "order": 4,
+          "from": "cli",
+          "to": "mesh-server",
+          "label": "POST /messages (skill_request)",
+          "description": "Request message sent to skill owner agent"
+        },
+        {
+          "order": 5,
+          "from": "mesh-client",
+          "to": "cli",
+          "label": "skill_transfer response",
+          "description": "Owner's client auto-responds with base64-encoded skill files, receiver installs to ~/.kiro/skills/"
+        }
+      ]
+    },
+    {
+      "id": "role-routing",
+      "name": "Role-Based Routing",
+      "description": "Message addressed to a role gets resolved to the best available agent",
+      "steps": [
+        {
+          "order": 1,
+          "from": "ai-agent",
+          "to": "mcp-server",
+          "label": "mesh_send(to: 'role:coder', msg)",
+          "description": "Agent sends message to a role instead of a specific agent name"
+        },
+        {
+          "order": 2,
+          "from": "mcp-server",
+          "to": "mesh-server",
+          "label": "POST /messages (to_agent: role:coder)",
+          "description": "MCP forwards message with role:xxx as the to_agent field"
+        },
+        {
+          "order": 3,
+          "from": "mesh-server",
+          "to": "role-resolver",
+          "label": "Resolve role",
+          "description": "Server detects role: prefix, invokes role resolver"
+        },
+        {
+          "order": 4,
+          "from": "role-resolver",
+          "to": "json-store",
+          "label": "Check online agents",
+          "description": "Resolver checks which role agents have last_seen < 30s, follows priority order"
+        },
+        {
+          "order": 5,
+          "from": "role-resolver",
+          "to": "message-router",
+          "label": "Deliver to resolved agent",
+          "description": "Message to_agent rewritten to resolved agent name (or queued if fallback=queue)"
+        }
+      ]
+    }
+  ]
+}
