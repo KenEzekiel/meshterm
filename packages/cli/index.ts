@@ -925,6 +925,31 @@ If you don't reply, the sender never sees your response.
 - \`mesh_room_list\` — list rooms
 - \`mesh_room_join\` — join a room
 - \`mesh_room_leave\` — leave a room
+
+## Chain Participation
+
+When you receive a task with a chain header (first line before \`---\`):
+\`\`\`
+[chain:<chainId>/<stepId>]
+---
+<task brief>
+\`\`\`
+
+You are part of a multi-step pipeline. Conventions:
+- Echo the chain header in your response
+- End with a clear status line: \`Status: SUCCESS\` or \`Status: FAILED\` or \`Status: BLOCKED\`
+- If BLOCKED, explain what you need from the human
+- Format output as a clear summary — the next agent receives it as context
+
+Response format:
+\`\`\`
+[chain:<chainId>/<stepId>] COMPLETE
+Status: SUCCESS
+Summary: <1-2 sentence result>
+Files Changed: <list if applicable>
+\`\`\`
+
+If you don't recognize the chain header, just respond normally — chains are optional.
 `;
 
     const mcpConfig: any = {
