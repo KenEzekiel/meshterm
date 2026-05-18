@@ -603,7 +603,7 @@ Bun.serve({
 
     // GET /messages/:agent?unread=true&limit=50
     const msgMatch = path.match(/^\/messages\/([^/]+)$/);
-    if (method === "GET" && msgMatch) {
+    if (method === "GET" && msgMatch && msgMatch[1] !== "search") {
       const agent = decodeURIComponent(msgMatch[1]);
       const unreadOnly = url.searchParams.get("unread") === "true";
       const limit = Number(url.searchParams.get("limit") ?? 50);
