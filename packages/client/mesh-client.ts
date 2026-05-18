@@ -134,8 +134,8 @@ const STUCK_TIMEOUT_MS = Number(process.env.MESH_CLIENT_STUCK_TIMEOUT ?? 600_000
 const STATE_POLL_MS = 20_000; // check tmux every 20s
 const STATE_NOTIFY_TO = process.env.MESH_CLIENT_NOTIFY ?? "kaze";
 
-type AgentState = "idle" | "working" | "stuck" | "done";
-let currentState: AgentState = "idle";
+type AgentState = "idle" | "working" | "stuck" | "done" | "unknown";
+let currentState: AgentState = "unknown";
 let currentProgress: number | null = null;
 let currentMessage: string = "";
 let lastOutputHash = "";
@@ -143,7 +143,7 @@ let lastTaskInjectedAt = 0;
 let lastOutputChangeAt = Date.now();
 
 function tmuxCapture(session: string): string {
-  const result = Bun.spawnSync(["tmux", "capture-pane", "-t", session, "-p", "-l", "30"]);
+  const result = Bun.spawnSync(["tmux", "capture-pane", "-t", session, "-p", "-S", "-30"]);
   if (result.exitCode !== 0) return "";
   return result.stdout.toString();
 }
