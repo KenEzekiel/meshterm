@@ -247,6 +247,10 @@ let rooms: Map<string, Room> = new Map();
 let roomMessages: RoomMessage[] = [];
 let skills: Map<string, Skill> = new Map();
 
+// Agent status cache (derived from agent_state messages, not persisted)
+interface AgentStatus { state: string; progress: number | null; message: string | null; since: string; taskId?: string; }
+const agentStatus: Map<string, AgentStatus> = new Map();
+
 // Load from disk
 if (existsSync(STORE_PATH)) {
   try {
@@ -378,7 +382,16 @@ Bun.serve({
 
     // GET /agents
     if (method === "GET" && path === "/agents") {
-      return json([...agents.values()]);
+      const now = Date.now();
+      const result = [...agents.values()].map(a => {
+        const status = agentStatus.get(a.name);
+        // Expire: if last_seen > 5min and state is "working", return "unknown"
+        if (status && a.last_seen && (now - new Date(a.last_seen).getTime() > 300_000) && status.state === "working") {
+          return { ...a, status: { ...status, state: "unknown" } };
+        }
+        return { ...a, status: status ?? null };
+      });
+      return json(result);
     }
 
     // PATCH /agents/:name — update delivery config
@@ -566,6 +579,10 @@ Bun.serve({
         state: "queued",
       };
       messages.push(msg);
+      // Update agent status cache if this is a state message
+      if (msg.metadata?.type === "agent_state" && msg.metadata.agent) {
+        agentStatus.set(msg.metadata.agent, { state: msg.metadata.state, progress: msg.metadata.progress ?? null, message: msg.metadata.message ?? null, since: msg.metadata.since ?? msg.created_at, taskId: msg.metadata.taskId });
+      }
       fireWebhook(msg.to_agent, msg);
       // Trim old messages
       if (messages.length > MAX_MESSAGES * 1.5) {

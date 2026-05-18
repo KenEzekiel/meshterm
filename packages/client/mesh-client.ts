@@ -127,8 +127,10 @@ const STUCK_TIMEOUT_MS = Number(process.env.MESH_CLIENT_STUCK_TIMEOUT ?? 600_000
 const STATE_POLL_MS = 20_000; // check tmux every 20s
 const STATE_NOTIFY_TO = process.env.MESH_CLIENT_NOTIFY ?? "kaze";
 
-type AgentState = "idle" | "working" | "stuck";
+type AgentState = "idle" | "working" | "stuck" | "done";
 let currentState: AgentState = "idle";
+let currentProgress: number | null = null;
+let currentMessage: string = "";
 let lastOutputHash = "";
 let lastTaskInjectedAt = 0;
 let lastOutputChangeAt = Date.now();
@@ -145,25 +147,58 @@ function simpleHash(s: string): string {
   return h.toString(36);
 }
 
+function detectProgress(output: string): { progress: number | null; message: string } {
+  const lines = output.trim().split("\n").filter(l => l.trim());
+  const last10 = lines.slice(-10).join("\n");
+
+  // Try X/Y pattern (e.g., "3/4 files", "15/25 tests")
+  const fraction = last10.match(/(\d+)\s*\/\s*(\d+)/);
+  if (fraction) {
+    const [, n, total] = fraction;
+    const pct = Math.round((Number(n) / Number(total)) * 100) / 100;
+    if (pct <= 1 && Number(total) > 1) return { progress: pct, message: fraction[0] };
+  }
+
+  // Try X% pattern
+  const pct = last10.match(/(\d+)%/);
+  if (pct) return { progress: Number(pct[1]) / 100, message: `${pct[1]}%` };
+
+  // Try "step N of M"
+  const step = last10.match(/step\s+(\d+)\s+of\s+(\d+)/i);
+  if (step) return { progress: Math.round((Number(step[1]) / Number(step[2])) * 100) / 100, message: `Step ${step[1]} of ${step[2]}` };
+
+  // Last meaningful line as message
+  const lastLine = lines[lines.length - 1]?.trim().slice(0, 80) || "";
+  return { progress: null, message: lastLine };
+}
+
 function detectState(output: string): AgentState {
   const lines = output.trim().split("\n");
   const lastLines = lines.slice(-5).join("\n");
-  // Idle: prompt visible at bottom (❯, %, $, or "Human:" for kiro-cli)
-  if (/[❯%$]\s*$/.test(lastLines) || /Human:\s*$/.test(lastLines)) return "idle";
+  if (/[>\u276f%$]\s*$/.test(lastLines) || /Human:\s*$/.test(lastLines)) return "idle";
   return "working";
 }
 
-async function notifyStateChange(newState: AgentState) {
+async function notifyStateChange(state: AgentState, progress: number | null, message: string) {
+  const body = `[state] ${AGENT}: ${state}${message ? ` -- ${message}` : ""}`;
   try {
     await meshFetch("/messages", {
       method: "POST",
       body: JSON.stringify({
         from_agent: AGENT,
         to_agent: STATE_NOTIFY_TO,
-        body: `[state] ${AGENT}: ${newState}${newState === "stuck" ? ` (no output for ${Math.round(STUCK_TIMEOUT_MS / 60000)} min after task)` : ""}`,
+        body,
+        metadata: {
+          type: "agent_state",
+          agent: AGENT,
+          state,
+          progress,
+          message: message || null,
+          since: new Date().toISOString(),
+        },
       }),
     });
-    console.log(`📡 State → ${newState} (notified ${STATE_NOTIFY_TO})`);
+    console.log(`📡 State -> ${state}${progress != null ? ` (${Math.round(progress * 100)}%)` : ""}`);
   } catch (e: any) {
     console.error(`State notify failed: ${e.message}`);
   }
@@ -176,24 +211,26 @@ async function checkState() {
   const hash = simpleHash(output);
   const now = Date.now();
 
-  // Track output changes
   if (hash !== lastOutputHash) {
     lastOutputHash = hash;
     lastOutputChangeAt = now;
   }
 
-  // Detect current state
   let detected = detectState(output);
+  const { progress, message } = detected === "working" ? detectProgress(output) : { progress: null, message: "" };
 
-  // Check for stuck: working but no output change for STUCK_TIMEOUT_MS after a task was sent
+  // Stuck detection
   if (detected === "working" && lastTaskInjectedAt > 0 && (now - lastOutputChangeAt) > STUCK_TIMEOUT_MS) {
     detected = "stuck";
   }
 
-  // Only notify on state change
-  if (detected !== currentState) {
+  // Notify on state change OR significant progress change
+  const progressChanged = progress !== null && currentProgress !== null && Math.abs(progress - currentProgress) >= 0.1;
+  if (detected !== currentState || progressChanged) {
     currentState = detected;
-    await notifyStateChange(detected);
+    currentProgress = progress;
+    currentMessage = message;
+    await notifyStateChange(detected, progress, message);
   }
 }
 
