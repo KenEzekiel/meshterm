@@ -45,7 +45,7 @@ async function meshFetch(path: string, opts?: RequestInit) {
 
 function tmuxSend(session: string, text: string) {
   const escaped = text.replace(/'/g, "'\\''");
-  const result = Bun.spawnSync(["tmux", "send-keys", "-t", session, escaped, "Enter"]);
+  const result = Bun.spawnSync(["tmux", "send-keys", "-t", `=${session}`, escaped, "Enter"]);
   if (result.exitCode !== 0) {
     console.error(`tmux send-keys failed: ${result.stderr.toString()}`);
     return false;
@@ -86,6 +86,13 @@ async function pollAndInject() {
         await meshFetch(`/messages/${msg.id}/read`, { method: "PATCH" });
         lastTaskInjectedAt = Date.now();
         lastOutputChangeAt = Date.now();
+        // Immediately report working state
+        if (currentState !== "working") {
+          currentState = "working";
+          currentProgress = null;
+          currentMessage = `Processing: ${msg.body.slice(0, 60)}`;
+          await notifyStateChange("working", null, currentMessage);
+        }
         console.log(`📨 Injected + read: ${msg.from_agent}: ${msg.body.slice(0, 60)}...`);
       } else {
         // Failed to inject — add to retry queue, DON'T mark read
@@ -173,9 +180,9 @@ function detectProgress(output: string): { progress: number | null; message: str
 }
 
 function detectState(output: string): AgentState {
-  const lines = output.trim().split("\n");
+  const lines = output.trim().split("\n").filter(l => l.trim());
   const lastLines = lines.slice(-5).join("\n");
-  if (/[>\u276f%$]\s*$/.test(lastLines) || /Human:\s*$/.test(lastLines)) return "idle";
+  if (/[>\u276f%$]\s*$/.test(lastLines) || /Human:\s*$/.test(lastLines) || /\d+%\s*!>/.test(lastLines)) return "idle";
   return "working";
 }
 
@@ -241,3 +248,5 @@ console.log(`   Polling every ${POLL_MS}ms | Max ${MAX_RETRY} retries | Stuck ti
 await register();
 setInterval(pollAndInject, POLL_MS);
 setInterval(checkState, STATE_POLL_MS);
+// Report initial state shortly after startup
+setTimeout(checkState, 3000);

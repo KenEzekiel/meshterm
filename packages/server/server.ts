@@ -601,6 +601,15 @@ Bun.serve({
       });
     }
 
+    // GET /messages/by-id/:id — fetch single message by ID
+    const msgByIdMatch = path.match(/^\/messages\/by-id\/([^/]+)$/);
+    if (method === "GET" && msgByIdMatch) {
+      const id = decodeURIComponent(msgByIdMatch[1]);
+      const msg = messages.find(m => m.id === id);
+      if (!msg) return json({ error: "not found" }, 404);
+      return json(msg);
+    }
+
     // GET /messages/:agent?unread=true&limit=50
     const msgMatch = path.match(/^\/messages\/([^/]+)$/);
     if (method === "GET" && msgMatch && msgMatch[1] !== "search") {
@@ -977,7 +986,7 @@ Bun.serve({
       }
 
       // List distinct tasks
-      const tasks = new Map<string, { taskId: string; messages: number; agents: Set<string>; started: string; lastActivity: string; latestPhase?: string }>();
+      const tasks = new Map<string, { taskId: string; taskTitle?: string; messages: number; agents: Set<string>; started: string; lastActivity: string; latestPhase?: string }>();
       for (const m of messages) {
         const tid = m.metadata?.taskId;
         if (!tid) continue;
@@ -988,6 +997,7 @@ Bun.serve({
         t.agents.add(m.from_agent);
         if (m.created_at > t.lastActivity) t.lastActivity = m.created_at;
         if (m.metadata?.taskPhase) t.latestPhase = m.metadata.taskPhase;
+        if (m.metadata?.taskTitle && !t.taskTitle) t.taskTitle = m.metadata.taskTitle;
       }
 
       return json([...tasks.values()].map(t => ({ ...t, agents: [...t.agents] })));

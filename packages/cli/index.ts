@@ -254,6 +254,7 @@ const { values: args, positionals } = parseArgs({
     mode: { type: "string" },
     moderator: { type: "string" },
     limit: { type: "string" },
+    metadata: { type: "string" },
     profile: { type: "string" },
     as: { type: "string" },
     force: { type: "boolean", default: false },
@@ -364,6 +365,15 @@ switch (command) {
     
     if (args.broadcast) {
       payload.broadcast = true;
+    }
+
+    if (args.metadata) {
+      try {
+        payload.metadata = JSON.parse(args.metadata);
+      } catch {
+        console.error("❌ --metadata must be valid JSON");
+        process.exit(1);
+      }
     }
 
     const result = await meshFetch(
@@ -1183,9 +1193,26 @@ If you don't recognize the chain header, just respond normally — chains are op
     if (!results.length) { console.log("No results"); break; }
     console.log(`🔍 ${results.length} result(s):\n`);
     for (const r of results) {
-      console.log(`  ${r.from_agent} → ${r.to_agent}  (${r.created_at})`);
+      console.log(`  [${r.id}] ${r.from_agent} → ${r.to_agent}  (${r.created_at})`);
       console.log(`  ${r.body}\n`);
     }
+    break;
+  }
+
+  case "read": {
+    const config = loadConfig();
+    if (!config) { console.error("❌ Not configured. Run: meshterm init"); process.exit(1); }
+    const id = rest[0];
+    if (!id) { console.error("Usage: meshterm read <message-id>"); process.exit(1); }
+    const msg = await meshFetch(`/messages/by-id/${encodeURIComponent(id)}`, config);
+    console.log(`📨 Message ${msg.id}\n`);
+    console.log(`  From: ${msg.from_agent}`);
+    console.log(`  To:   ${msg.to_agent}`);
+    console.log(`  Date: ${msg.created_at}`);
+    console.log(`  Read: ${msg.read}`);
+    if (msg.reply_to) console.log(`  Reply to: ${msg.reply_to}`);
+    if (msg.metadata) console.log(`  Metadata: ${JSON.stringify(msg.metadata)}`);
+    console.log(`\n${msg.body}`);
     break;
   }
 
@@ -1198,9 +1225,15 @@ If you don't recognize the chain header, just respond normally — chains are op
     if (!tasks.length) { console.log("No tasks found"); break; }
     console.log(`📋 ${tasks.length} task(s):\n`);
     for (const t of tasks) {
-      console.log(`  ${t.taskId}`);
-      console.log(`    ${t.messages} messages, agents: ${t.agents.join(", ")}, phase: ${t.latestPhase || "unknown"}`);
-      console.log(`    ${t.started} → ${t.lastActivity}\n`);
+      const statusEmoji = t.latestPhase === "done" ? "✅" : t.latestPhase === "blocked" ? "🚫" : t.latestPhase === "failed" ? "❌" : "🔄";
+      const started = new Date(t.started);
+      const last = new Date(t.lastActivity);
+      const durationMs = last.getTime() - started.getTime();
+      const durationMin = Math.floor(durationMs / 60000);
+      const duration = durationMin >= 60 ? `${Math.floor(durationMin / 60)}h${durationMin % 60}m` : `${durationMin}m`;
+      const title = t.taskTitle ? ` ${t.taskTitle}` : "";
+      console.log(`  ${statusEmoji} ${t.taskId}${title}`);
+      console.log(`    ${t.messages} msgs | ${t.agents.join(", ")} | ${duration} | ${t.latestPhase || "in-progress"}\n`);
     }
     break;
   }
