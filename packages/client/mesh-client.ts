@@ -66,6 +66,7 @@ async function register() {
 }
 
 let processing = false;
+const seenIds = new Set<string>();
 
 async function pollAndInject() {
   if (processing) return;
@@ -76,8 +77,10 @@ async function pollAndInject() {
     const msgs = await meshFetch(`/messages/${AGENT}?unread=true`);
 
     for (const msg of msgs) {
-      // Skip if already in retry queue (handled below)
+      // Skip if already seen or in retry queue
+      if (seenIds.has(msg.id)) continue;
       if (retryQueue.has(msg.id)) continue;
+      seenIds.add(msg.id);
 
       const injected = `[mesh:${msg.from_agent}#${msg.id}] ${msg.body}`;
       if (tmuxSend(SESSION, injected)) {

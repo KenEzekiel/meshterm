@@ -634,7 +634,7 @@ Bun.serve({
       }
 
       let result = messages.filter((m) => m.to_agent === agent);
-      if (unreadOnly) result = result.filter((m) => !m.read && m.state !== "fetched");
+      if (unreadOnly) result = result.filter((m) => !m.read);
       result = result.slice(-limit);
       
       // Mark fetched messages
