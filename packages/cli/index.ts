@@ -1208,15 +1208,19 @@ If you don't recognize the chain header, just respond normally — chains are op
     if (!config) { console.error("❌ Not configured. Run: meshterm init"); process.exit(1); }
     const id = rest[0];
     if (!id) { console.error("Usage: meshterm read <message-id>"); process.exit(1); }
-    const msg = await meshFetch(`/messages/by-id/${encodeURIComponent(id)}`, config);
-    console.log(`📨 Message ${msg.id}\n`);
-    console.log(`  From: ${msg.from_agent}`);
-    console.log(`  To:   ${msg.to_agent}`);
-    console.log(`  Date: ${msg.created_at}`);
-    console.log(`  Read: ${msg.read}`);
-    if (msg.reply_to) console.log(`  Reply to: ${msg.reply_to}`);
-    if (msg.metadata) console.log(`  Metadata: ${JSON.stringify(msg.metadata)}`);
-    console.log(`\n${msg.body}`);
+    try {
+      const msg = await meshFetch(`/messages/by-id/${encodeURIComponent(id)}`, config);
+      console.log(`📨 Message ${msg.id}\n`);
+      console.log(`  From: ${msg.from_agent}`);
+      console.log(`  To:   ${msg.to_agent}`);
+      console.log(`  Date: ${msg.created_at}`);
+      console.log(`  Read: ${msg.read}`);
+      if (msg.reply_to) console.log(`  Reply to: ${msg.reply_to}`);
+      if (msg.metadata) console.log(`  Metadata: ${JSON.stringify(msg.metadata)}`);
+      console.log(`\n${msg.body}`);
+    } catch {
+      console.error(`❌ Message not found: ${id}`);
+    }
     break;
   }
 
