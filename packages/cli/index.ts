@@ -1193,8 +1193,12 @@ If you don't recognize the chain header, just respond normally — chains are op
     if (!results.length) { console.log("No results"); break; }
     console.log(`🔍 ${results.length} result(s):\n`);
     for (const r of results) {
-      console.log(`  [${r.id}] ${r.from_agent} → ${r.to_agent}  (${r.created_at})`);
-      console.log(`  ${r.body}\n`);
+      const d = new Date(r.created_at);
+      const date = d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const body = r.body.replace(/\n/g, " ").slice(0, 120);
+      console.log(`> [${r.id}] ${r.from_agent} → ${r.to_agent}`);
+      console.log(`> ${date}`);
+      console.log(`> ${body}${r.body.length > 120 ? "..." : ""}\n`);
     }
     break;
   }
@@ -1245,10 +1249,29 @@ If you don't recognize the chain header, just respond normally — chains are op
     if (!taskId) { console.error("Usage: meshterm task <taskId>"); process.exit(1); }
     const msgs = await meshFetch(`/tasks?taskId=${encodeURIComponent(taskId)}`, config);
     if (!msgs.length) { console.log(`No messages for task: ${taskId}`); break; }
-    console.log(`📋 Task: ${taskId} (${msgs.length} messages)\n`);
-    for (const m of msgs) {
-      console.log(`  [${m.created_at}] ${m.from_agent} → ${m.to_agent}`);
-      console.log(`  ${m.body.slice(0, 120)}${m.body.length > 120 ? "..." : ""}\n`);
+
+    // Header
+    const sorted = msgs.sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+    const title = first.metadata?.taskTitle || "";
+    const agents = [...new Set(sorted.map((m: any) => m.from_agent))];
+    const phases = sorted.map((m: any) => m.metadata?.taskPhase).filter(Boolean);
+    const uniquePhases = [...new Set(phases)];
+    const durationMs = new Date(last.created_at).getTime() - new Date(first.created_at).getTime();
+    const durationMin = Math.floor(durationMs / 60000);
+    const duration = durationMin >= 60 ? `${Math.floor(durationMin / 60)}h${durationMin % 60}m` : `${durationMin}m`;
+
+    console.log(`📋 ${taskId}${title ? ` — "${title}"` : ""}`);
+    if (uniquePhases.length) console.log(`   Phase: ${uniquePhases.join(" → ")}`);
+    console.log(`   Agents: ${agents.join(", ")}`);
+    console.log(`   Duration: ${duration}\n`);
+
+    // Messages
+    for (const m of sorted) {
+      const t = new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      console.log(`   [${m.id.slice(0, 8)}] ${m.from_agent} → ${m.to_agent} (${t})`);
+      console.log(`   ${m.body}\n`);
     }
     break;
   }
