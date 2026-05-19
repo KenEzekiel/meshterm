@@ -69,12 +69,11 @@ let processing = false;
 
 async function pollAndInject() {
   if (processing) return;
+  processing = true;
 
   try {
     // Process new unread messages
     const msgs = await meshFetch(`/messages/${AGENT}?unread=true`);
-
-    processing = true;
 
     for (const msg of msgs) {
       // Skip if already in retry queue (handled below)
