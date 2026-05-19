@@ -182,7 +182,12 @@ function detectProgress(output: string): { progress: number | null; message: str
 function detectState(output: string): AgentState {
   const lines = output.trim().split("\n").filter(l => l.trim());
   const lastLines = lines.slice(-5).join("\n");
+  // Standard prompts
   if (/[>\u276f%$]\s*$/.test(lastLines) || /Human:\s*$/.test(lastLines) || /\d+%\s*!>/.test(lastLines)) return "idle";
+  // Kiro CLI idle indicators (UI elements shown when waiting for input)
+  if (/\/(copy to clipboard|undo|redo|clear|model|help|exit)\s*$/.test(lastLines)) return "idle";
+  if (/ask a question or describe a task/.test(lastLines)) return "idle";
+  if (/Kiro\s[·•]\s/.test(lastLines)) return "idle";
   return "working";
 }
 
@@ -225,6 +230,12 @@ async function checkState() {
 
   let detected = detectState(output);
   const { progress, message } = detected === "working" ? detectProgress(output) : { progress: null, message: "" };
+
+  // Time-based idle: if output unchanged for 2min and no recent task, assume idle
+  const IDLE_TIMEOUT_MS = 120_000;
+  if (detected === "working" && (now - lastOutputChangeAt) > IDLE_TIMEOUT_MS && (now - lastTaskInjectedAt) > IDLE_TIMEOUT_MS) {
+    detected = "idle";
+  }
 
   // Stuck detection
   if (detected === "working" && lastTaskInjectedAt > 0 && (now - lastOutputChangeAt) > STUCK_TIMEOUT_MS) {
