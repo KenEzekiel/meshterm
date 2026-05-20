@@ -155,6 +155,11 @@ export class ZellijBackend implements TerminalBackend {
       if (this.sessionExists(session)) break;
     }
 
+    // Dismiss startup tips overlay (Ctrl+c = byte 3 to disable permanently)
+    Bun.sleepSync(500);
+    spawnSync([this.bin, "--session", session, "action", "write", "3"]);
+    Bun.sleepSync(300);
+
     try { require("fs").unlinkSync(tmpLayout); } catch {}
     return this.sessionExists(session);
   }
