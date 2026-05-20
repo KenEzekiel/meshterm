@@ -132,17 +132,17 @@ export class ZellijBackend implements TerminalBackend {
   }
 
   newSession(session: string, cmd: string, env?: Record<string, string>): boolean {
-    const envArgs: string[] = [];
-    if (env) {
-      for (const [k, v] of Object.entries(env)) {
-        envArgs.push(`${k}=${v}`);
-      }
-    }
+    const tmpLayout = `/tmp/meshterm-zellij-${session}.kdl`;
+    const cmdParts = cmd.split(" ");
+    const command = cmdParts[0];
+    const args = cmdParts.slice(1);
+    const argsKdl = args.length > 0 ? `\n        args ${args.map(a => `"${a}"`).join(" ")}` : "";
+    const envKdl = env ? Object.entries(env).map(([k, v]) => `\n        env { ${k} "${v}" }`).join("") : "";
 
-    const shellCmd = envArgs.length > 0 ? `${envArgs.join(" ")} ${cmd}` : cmd;
+    const layout = `layout {\n    pane command="${command}" {${argsKdl}${envKdl}\n    }\n}\n`;
+    require("fs").writeFileSync(tmpLayout, layout);
 
-    const proc = Bun.spawn(["script", "-q", "/dev/null", this.bin, "-s", session], {
-      env: { ...process.env, ...env },
+    const proc = Bun.spawn(["script", "-q", "/dev/null", this.bin, "-s", session, "--new-session-with-layout", tmpLayout], {
       stdout: "ignore",
       stderr: "ignore",
       stdin: "ignore",
@@ -155,10 +155,8 @@ export class ZellijBackend implements TerminalBackend {
       if (this.sessionExists(session)) break;
     }
 
-    this.dismissOverlay(session);
-    Bun.sleepSync(500);
-
-    return this.send(session, shellCmd);
+    try { require("fs").unlinkSync(tmpLayout); } catch {}
+    return this.sessionExists(session);
   }
 
   private dismissOverlay(session: string): void {
