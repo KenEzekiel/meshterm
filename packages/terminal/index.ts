@@ -140,7 +140,6 @@ export class ZellijBackend implements TerminalBackend {
       stderr: "ignore",
       stdin: "ignore",
     });
-    proc.unref();
 
     const maxWait = 10;
     for (let i = 0; i < maxWait; i++) {
@@ -152,6 +151,9 @@ export class ZellijBackend implements TerminalBackend {
     Bun.sleepSync(1000);
     spawnSync([this.bin, "--session", session, "action", "write", "3"]);
     Bun.sleepSync(1000);
+
+    // Kill the script process — zellij server persists independently
+    try { process.kill(proc.pid, "SIGTERM"); } catch {}
 
     try { require("fs").unlinkSync(tmpLayout); } catch {}
 
