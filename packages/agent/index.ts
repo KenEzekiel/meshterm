@@ -3,7 +3,7 @@
  * meshterm agent lifecycle — start, stop, list agents.
  *
  * Usage:
- *   bun meshterm-agent.ts start --name <name> --cli <command> --session <tmux-session> --mesh <url> --secret <secret>
+ *   bun meshterm-agent.ts start --name <name> --cli <command> --session <session> --mesh <url> --secret <secret>
  *   bun meshterm-agent.ts stop --name <name> [--kill-session]
  *   bun meshterm-agent.ts list
  */
@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { spawnSync } from "child_process";
+import { createBackend, type TerminalBackend } from "../terminal";
 
 const STATE_DIR = process.env.MESHTERM_CONFIG_DIR ?? join(homedir(), ".meshterm");
 const STATE_FILE = join(STATE_DIR, "agents.json");
@@ -64,18 +65,7 @@ function isAlive(pid: number): boolean {
   }
 }
 
-// Resolve tmux path (compiled binaries may not have /opt/homebrew/bin in PATH)
-const TMUX = (() => {
-  for (const p of ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]) {
-    if (existsSync(p)) return p;
-  }
-  return "tmux"; // fallback to PATH
-})();
-
-function tmuxSessionExists(session: string): boolean {
-  const result = spawnSync(TMUX, ["has-session", "-t", session]);
-  return result.status === 0;
-}
+const terminal: TerminalBackend = createBackend();
 
 const [subcommand] = process.argv.slice(2);
 const rawArgs = process.argv.slice(3);
@@ -110,16 +100,14 @@ export async function runAgent(sub?: string, args?: string[]) {
     const mesh = opts.mesh as string;
     const secret = opts.secret as string;
 
-    // 1. Create tmux session if not exists
-    if (!tmuxSessionExists(session)) {
-      console.log(`Creating tmux session: ${session}`);
+    if (!terminal.sessionExists(session)) {
+      console.log(`Creating ${terminal.name} session: ${session}`);
       console.log(`Starting CLI: ${cli}`);
-      const tmuxArgs = ["new-session", "-d", "-s", session];
-      if (PROFILE) tmuxArgs.push("-e", `MESHTERM_PROFILE=${PROFILE}`);
-      tmuxArgs.push(cli);
-      spawnSync(TMUX, tmuxArgs);
+      const env: Record<string, string> = {};
+      if (PROFILE) env.MESHTERM_PROFILE = PROFILE;
+      terminal.newSession(session, cli, Object.keys(env).length ? env : undefined);
     } else {
-      console.log(`Tmux session "${session}" already exists — skipping CLI launch (attach with: meshterm agent attach --name ${name})`);
+      console.log(`Session "${session}" already exists — skipping CLI launch (attach with: meshterm agent attach --name ${name})`);
     }
 
     // 3. Start mesh-client in background
@@ -207,10 +195,9 @@ export async function runAgent(sub?: string, args?: string[]) {
       console.log(`mesh-client already dead (PID: ${entry.meshClientPid})`);
     }
 
-    // Optionally kill tmux session
-    if (opts["kill-session"] && tmuxSessionExists(entry.session)) {
-      spawnSync(TMUX, ["kill-session", "-t", entry.session]);
-      console.log(`Killed tmux session: ${entry.session}`);
+    if (opts["kill-session"] && terminal.sessionExists(entry.session)) {
+      terminal.killSession(entry.session);
+      console.log(`Killed session: ${entry.session}`);
     }
 
     delete state[stopName];
@@ -230,8 +217,8 @@ export async function runAgent(sub?: string, args?: string[]) {
     }
     for (const entry of entries) {
       const alive = isAlive(entry.meshClientPid);
-      const sessionUp = tmuxSessionExists(entry.session);
-      const status = alive && sessionUp ? "✅ running" : alive ? "⚠️  no tmux" : sessionUp ? "⚠️  no mesh-client" : "❌ dead";
+      const sessionUp = terminal.sessionExists(entry.session);
+      const status = alive && sessionUp ? "✅ running" : alive ? "⚠️  no session" : sessionUp ? "⚠️  no mesh-client" : "❌ dead";
       const prof = entry.profile && entry.profile !== "default" ? `  profile=${entry.profile}` : "";
       console.log(`${entry.name}  session=${entry.session}  pid=${entry.meshClientPid}  ${status}${prof}  started=${entry.startedAt}`);
     }
@@ -260,14 +247,12 @@ export async function runAgent(sub?: string, args?: string[]) {
       process.exit(1);
     }
 
-    if (!tmuxSessionExists(entry.session)) {
+    if (!terminal.sessionExists(entry.session)) {
       console.error(`Tmux session "${entry.session}" not found.`);
       process.exit(1);
     }
 
-    // Replace this process with tmux attach
-    const result = spawnSync(TMUX, ["attach", "-t", entry.session], { stdio: "inherit" });
-    process.exit(result.exitCode ?? 0);
+    terminal.attach(entry.session);
   }
 
   case "register": {

@@ -1,12 +1,13 @@
 #!/usr/bin/env bun
 /**
  * Mesh Client v3.1 — Dumb pipe with retry on failure.
- * Polls mesh for unread messages, injects into tmux.
+ * Polls mesh for unread messages, injects into terminal session.
  * Marks as read after successful first inject.
- * Retries only if tmux inject FAILS (not if agent is busy).
+ * Retries only if inject FAILS (not if agent is busy).
  */
 
 import { parseArgs } from "util";
+import { createBackend, type TerminalBackend } from "../terminal";
 
 const { values: args } = parseArgs({
   options: {
@@ -17,6 +18,7 @@ const { values: args } = parseArgs({
     poll: { type: "string", default: process.env.__MESH_CLIENT_POLL ?? "5000" },
     type: { type: "string", default: process.env.__MESH_CLIENT_TYPE ?? "kiro" },
     host: { type: "string", default: process.env.__MESH_CLIENT_HOST ?? "unknown" },
+    backend: { type: "string", default: process.env.MESHTERM_BACKEND ?? "" },
   },
   strict: false,
 });
@@ -29,28 +31,20 @@ const POLL_MS = Number(args.poll);
 const MAX_RETRY = 5;
 const RETRY_INTERVAL_MS = 30_000;
 
+const terminal: TerminalBackend = createBackend(args.backend as any || undefined);
+console.log(`Terminal backend: ${terminal.name}`);
+
 const headers = {
   "content-type": "application/json",
   "x-mesh-secret": SECRET,
 };
 
-// Track failed injects for retry: id → { attempts, lastAttemptAt }
 const retryQueue: Map<string, { attempts: number; lastAttemptAt: number; msg: any }> = new Map();
 
 async function meshFetch(path: string, opts?: RequestInit) {
   const res = await fetch(`${MESH}${path}`, { ...opts, headers });
   if (!res.ok) throw new Error(`Mesh ${res.status}: ${await res.text()}`);
   return res.json();
-}
-
-function tmuxSend(session: string, text: string) {
-  const escaped = text.replace(/'/g, "'\\''");
-  const result = Bun.spawnSync(["tmux", "send-keys", "-t", `=${session}`, escaped, "Enter"]);
-  if (result.exitCode !== 0) {
-    console.error(`tmux send-keys failed: ${result.stderr.toString()}`);
-    return false;
-  }
-  return true;
 }
 
 async function register() {
@@ -83,7 +77,7 @@ async function pollAndInject() {
       seenIds.add(msg.id);
 
       const injected = `[mesh:${msg.from_agent}#${msg.id}] ${msg.body}`;
-      if (tmuxSend(SESSION, injected)) {
+      if (terminal.send(SESSION, injected)) {
         // Success — mark as read immediately
         await meshFetch(`/messages/${msg.id}/read`, { method: "PATCH" });
         lastTaskInjectedAt = Date.now();
@@ -114,7 +108,7 @@ async function pollAndInject() {
       if (now - entry.lastAttemptAt < RETRY_INTERVAL_MS) continue;
 
       const injected = `[mesh:${entry.msg.from_agent}#${entry.msg.id}] ${entry.msg.body}`;
-      if (tmuxSend(SESSION, injected)) {
+      if (terminal.send(SESSION, injected)) {
         await meshFetch(`/messages/${id}/read`, { method: "PATCH" });
         console.log(`🔄 Retry success (attempt ${entry.attempts + 1}): ${entry.msg.body.slice(0, 60)}...`);
         retryQueue.delete(id);
@@ -133,7 +127,7 @@ async function pollAndInject() {
 
 // --- State Detection ---
 const STUCK_TIMEOUT_MS = Number(process.env.MESH_CLIENT_STUCK_TIMEOUT ?? 600_000); // 10 min default
-const STATE_POLL_MS = 20_000; // check tmux every 20s
+const STATE_POLL_MS = 20_000;
 const STATE_NOTIFY_TO = process.env.MESH_CLIENT_NOTIFY ?? "kaze";
 
 type AgentState = "idle" | "working" | "stuck" | "done" | "unknown";
@@ -143,12 +137,6 @@ let currentMessage: string = "";
 let lastOutputHash = "";
 let lastTaskInjectedAt = 0;
 let lastOutputChangeAt = Date.now();
-
-function tmuxCapture(session: string): string {
-  const result = Bun.spawnSync(["tmux", "capture-pane", "-t", session, "-p", "-S", "-30"]);
-  if (result.exitCode !== 0) return "";
-  return result.stdout.toString();
-}
 
 function simpleHash(s: string): string {
   let h = 0;
@@ -219,7 +207,7 @@ async function notifyStateChange(state: AgentState, progress: number | null, mes
 }
 
 async function checkState() {
-  const output = tmuxCapture(SESSION);
+  const output = terminal.capture(SESSION);
   if (!output) return;
 
   const hash = simpleHash(output);
