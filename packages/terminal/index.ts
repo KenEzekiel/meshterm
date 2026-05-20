@@ -117,7 +117,7 @@ export class ZellijBackend implements TerminalBackend {
   }
 
   capture(session: string, lines: number = 30): string {
-    const result = spawnSync([this.bin, "--session", session, "action", "dump-screen", "--full", "/dev/stdout"]);
+    const result = spawnSync([this.bin, "--session", session, "action", "dump-screen", "--full"]);
     if (result.exitCode !== 0) return "";
     const allLines = result.stdout.toString().split("\n");
     return allLines.slice(-lines).join("\n");
@@ -131,19 +131,37 @@ export class ZellijBackend implements TerminalBackend {
   }
 
   newSession(session: string, cmd: string, env?: Record<string, string>): boolean {
-    const createResult = spawnSync([this.bin, "attach", session, "--create-background"]);
-    if (createResult.exitCode !== 0) {
-      console.error(`zellij create session failed: ${createResult.stderr.toString()}`);
-      return false;
+    const envArgs: string[] = [];
+    if (env) {
+      for (const [k, v] of Object.entries(env)) {
+        envArgs.push(`${k}=${v}`);
+      }
     }
 
-    let fullCmd = cmd;
-    if (env && Object.keys(env).length > 0) {
-      const envPrefix = Object.entries(env).map(([k, v]) => `${k}=${v}`).join(" ");
-      fullCmd = `${envPrefix} ${cmd}`;
+    const shellCmd = envArgs.length > 0 ? `${envArgs.join(" ")} ${cmd}` : cmd;
+
+    const proc = Bun.spawn(["script", "-q", "/dev/null", this.bin, "-s", session], {
+      env: { ...process.env, ...env },
+      stdout: "ignore",
+      stderr: "ignore",
+      stdin: "ignore",
+    });
+    proc.unref();
+
+    const maxWait = 10;
+    for (let i = 0; i < maxWait; i++) {
+      Bun.sleepSync(500);
+      if (this.sessionExists(session)) break;
     }
 
-    return this.send(session, fullCmd);
+    this.dismissOverlay(session);
+    Bun.sleepSync(500);
+
+    return this.send(session, shellCmd);
+  }
+
+  private dismissOverlay(session: string): void {
+    spawnSync([this.bin, "--session", session, "action", "write", "27"]);
   }
 
   killSession(session: string): boolean {
