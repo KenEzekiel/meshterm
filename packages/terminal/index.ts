@@ -109,7 +109,7 @@ export class ZellijBackend implements TerminalBackend {
       return false;
     }
     Bun.sleepSync(100);
-    const enterResult = spawnSync([this.bin, "--session", session, "action", "write", "10"]);
+    const enterResult = spawnSync([this.bin, "--session", session, "action", "write", "13"]);
     if (enterResult.exitCode !== 0) {
       console.error(`zellij write Enter failed: ${enterResult.stderr.toString()}`);
       return false;
