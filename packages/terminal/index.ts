@@ -135,7 +135,7 @@ export class ZellijBackend implements TerminalBackend {
     const tmpLayout = `/tmp/meshterm-zellij-${session}.kdl`;
     require("fs").writeFileSync(tmpLayout, "layout {\n    pane\n}\n");
 
-    const proc = Bun.spawn(["script", "-q", "/dev/null", this.bin, "-s", session, "--new-session-with-layout", tmpLayout], {
+    const proc = Bun.spawn(["nohup", "script", "-q", "/dev/null", this.bin, "-s", session, "--new-session-with-layout", tmpLayout], {
       stdout: "ignore",
       stderr: "ignore",
       stdin: "ignore",
