@@ -133,13 +133,15 @@ export class ZellijBackend implements TerminalBackend {
 
   newSession(session: string, cmd: string, env?: Record<string, string>): boolean {
     const tmpLayout = `/tmp/meshterm-zellij-${session}.kdl`;
+    const tmpScript = `/tmp/meshterm-zellij-${session}.sh`;
     require("fs").writeFileSync(tmpLayout, "layout {\n    pane\n}\n");
+    require("fs").writeFileSync(tmpScript, `#!/bin/bash\nstty rows 100 cols 200 2>/dev/null\nexec ${this.bin} -s ${session} --new-session-with-layout ${tmpLayout}\n`);
+    require("fs").chmodSync(tmpScript, 0o755);
 
-    const zellijCmd = `stty rows 100 cols 200 2>/dev/null; exec ${this.bin} -s ${session} --new-session-with-layout ${tmpLayout}`;
     const isLinux = process.platform === "linux";
     const scriptArgs = isLinux
-      ? ["nohup", "script", "-q", "-c", `bash -c '${zellijCmd}'`, "/dev/null"]
-      : ["nohup", "script", "-q", "/dev/null", "bash", "-c", zellijCmd];
+      ? ["nohup", "script", "-q", "-c", tmpScript, "/dev/null"]
+      : ["nohup", "script", "-q", "/dev/null", tmpScript];
 
     const proc = Bun.spawn(scriptArgs, {
       stdout: "ignore",
