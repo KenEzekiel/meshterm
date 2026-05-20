@@ -143,7 +143,6 @@ export async function runAgent(sub?: string, args?: string[]) {
       console.error(`Registration failed: ${e.message}`);
     }
 
-    // 5. Save state
     const state = loadState();
     state[name] = {
       name,
@@ -151,6 +150,7 @@ export async function runAgent(sub?: string, args?: string[]) {
       meshClientPid: proc.pid,
       meshUrl: mesh,
       cli,
+      backend: terminal.name,
       profile: PROFILE ?? "default",
       startedAt: new Date().toISOString(),
     };
@@ -217,7 +217,8 @@ export async function runAgent(sub?: string, args?: string[]) {
     }
     for (const entry of entries) {
       const alive = isAlive(entry.meshClientPid);
-      const sessionUp = terminal.sessionExists(entry.session);
+      const entryBackend = entry.backend ? createBackend(entry.backend as any) : terminal;
+      const sessionUp = entryBackend.sessionExists(entry.session);
       const status = alive && sessionUp ? "✅ running" : alive ? "⚠️  no session" : sessionUp ? "⚠️  no mesh-client" : "❌ dead";
       const prof = entry.profile && entry.profile !== "default" ? `  profile=${entry.profile}` : "";
       console.log(`${entry.name}  session=${entry.session}  pid=${entry.meshClientPid}  ${status}${prof}  started=${entry.startedAt}`);
@@ -247,12 +248,14 @@ export async function runAgent(sub?: string, args?: string[]) {
       process.exit(1);
     }
 
-    if (!terminal.sessionExists(entry.session)) {
-      console.error(`Tmux session "${entry.session}" not found.`);
+    const attachBackend = entry.backend ? createBackend(entry.backend as any) : terminal;
+
+    if (!attachBackend.sessionExists(entry.session)) {
+      console.error(`Session "${entry.session}" not found (backend: ${attachBackend.name}).`);
       process.exit(1);
     }
 
-    terminal.attach(entry.session);
+    attachBackend.attach(entry.session);
   }
 
   case "register": {
