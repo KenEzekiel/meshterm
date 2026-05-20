@@ -43,7 +43,7 @@ export class TmuxBackend implements TerminalBackend {
 
   send(session: string, text: string): boolean {
     const escaped = text.replace(/'/g, "'\\''");
-    const result = spawnSync([this.bin, "send-keys", "-t", `=${session}`, escaped, "Enter"]);
+    const result = spawnSync([this.bin, "send-keys", "-t", session, escaped, "Enter"]);
     if (result.exitCode !== 0) {
       console.error(`tmux send-keys failed: ${result.stderr.toString()}`);
       return false;
@@ -58,7 +58,7 @@ export class TmuxBackend implements TerminalBackend {
   }
 
   sessionExists(session: string): boolean {
-    const result = spawnSync([this.bin, "has-session", "-t", `=${session}`]);
+    const result = spawnSync([this.bin, "has-session", "-t", session]);
     return result.exitCode === 0;
   }
 
@@ -75,12 +75,12 @@ export class TmuxBackend implements TerminalBackend {
   }
 
   killSession(session: string): boolean {
-    const result = spawnSync([this.bin, "kill-session", "-t", `=${session}`]);
+    const result = spawnSync([this.bin, "kill-session", "-t", session]);
     return result.exitCode === 0;
   }
 
   attach(session: string): void {
-    const result = spawnSync([this.bin, "attach", "-t", `=${session}`], { stdio: "inherit" });
+    const result = spawnSync([this.bin, "attach", "-t", session], { stdio: "inherit" });
     process.exit(result.exitCode ?? 0);
   }
 }
