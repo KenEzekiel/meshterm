@@ -135,11 +135,13 @@ export class ZellijBackend implements TerminalBackend {
     const tmpLayout = `/tmp/meshterm-zellij-${session}.kdl`;
     require("fs").writeFileSync(tmpLayout, "layout {\n    pane\n}\n");
 
-    const proc = Bun.spawn(["nohup", "script", "-q", "/dev/null", this.bin, "-s", session, "--new-session-with-layout", tmpLayout], {
+    const shellScript = `stty rows 100 cols 200 2>/dev/null; exec ${this.bin} -s ${session} --new-session-with-layout ${tmpLayout}`;
+    const proc = Bun.spawn(["nohup", "script", "-q", "/dev/null", "bash", "-c", shellScript], {
       stdout: "ignore",
       stderr: "ignore",
       stdin: "ignore",
     });
+    proc.unref();
 
     const maxWait = 10;
     for (let i = 0; i < maxWait; i++) {
@@ -151,9 +153,6 @@ export class ZellijBackend implements TerminalBackend {
     Bun.sleepSync(1000);
     spawnSync([this.bin, "--session", session, "action", "write", "3"]);
     Bun.sleepSync(1000);
-
-    // Kill the script process — zellij server persists independently
-    try { process.kill(proc.pid, "SIGTERM"); } catch {}
 
     try { require("fs").unlinkSync(tmpLayout); } catch {}
 
