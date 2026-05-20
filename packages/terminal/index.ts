@@ -139,7 +139,7 @@ export class ZellijBackend implements TerminalBackend {
     const argsKdl = args.length > 0 ? `\n        args ${args.map(a => `"${a}"`).join(" ")}` : "";
     const envKdl = env ? Object.entries(env).map(([k, v]) => `\n        env { ${k} "${v}" }`).join("") : "";
 
-    const layout = `layout {\n    pane command="${command}" {${argsKdl}${envKdl}\n    }\n}\n`;
+    const layout = `layout {\n    pane command="${command}" start_suspended=false {${argsKdl}${envKdl}\n    }\n}\n`;
     require("fs").writeFileSync(tmpLayout, layout);
 
     const proc = Bun.spawn(["script", "-q", "/dev/null", this.bin, "-s", session, "--new-session-with-layout", tmpLayout], {
