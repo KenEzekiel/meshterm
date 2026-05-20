@@ -80,7 +80,7 @@ export class TmuxBackend implements TerminalBackend {
   }
 
   attach(session: string): void {
-    const result = spawnSync([this.bin, "attach", "-t", session], { stdio: "inherit" });
+    const result = spawnSync([this.bin, "attach", "-t", session], { stdio: ["inherit", "inherit", "inherit"] });
     process.exit(result.exitCode ?? 0);
   }
 }
@@ -152,7 +152,7 @@ export class ZellijBackend implements TerminalBackend {
   }
 
   attach(session: string): void {
-    const result = spawnSync([this.bin, "attach", session], { stdio: "inherit" });
+    const result = spawnSync([this.bin, "attach", session], { stdio: ["inherit", "inherit", "inherit"] });
     process.exit(result.exitCode ?? 0);
   }
 }
