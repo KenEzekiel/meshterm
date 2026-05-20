@@ -133,14 +133,7 @@ export class ZellijBackend implements TerminalBackend {
 
   newSession(session: string, cmd: string, env?: Record<string, string>): boolean {
     const tmpLayout = `/tmp/meshterm-zellij-${session}.kdl`;
-    const cmdParts = cmd.split(" ");
-    const command = cmdParts[0];
-    const args = cmdParts.slice(1);
-    const argsKdl = args.length > 0 ? `\n        args ${args.map(a => `"${a}"`).join(" ")}` : "";
-    const envKdl = env ? Object.entries(env).map(([k, v]) => `\n        env { ${k} "${v}" }`).join("") : "";
-
-    const layout = `layout {\n    pane command="${command}" {${argsKdl}${envKdl}\n        start_suspended false\n    }\n}\n`;
-    require("fs").writeFileSync(tmpLayout, layout);
+    require("fs").writeFileSync(tmpLayout, "layout {\n    pane\n}\n");
 
     const proc = Bun.spawn(["script", "-q", "/dev/null", this.bin, "-s", session, "--new-session-with-layout", tmpLayout], {
       stdout: "ignore",
@@ -161,7 +154,14 @@ export class ZellijBackend implements TerminalBackend {
     Bun.sleepSync(300);
 
     try { require("fs").unlinkSync(tmpLayout); } catch {}
-    return this.sessionExists(session);
+
+    let fullCmd = cmd;
+    if (env && Object.keys(env).length > 0) {
+      const envPrefix = Object.entries(env).map(([k, v]) => `${k}=${v}`).join(" ");
+      fullCmd = `${envPrefix} ${cmd}`;
+    }
+
+    return this.send(session, fullCmd);
   }
 
   private dismissOverlay(session: string): void {
