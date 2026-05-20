@@ -195,9 +195,12 @@ export async function runAgent(sub?: string, args?: string[]) {
       console.log(`mesh-client already dead (PID: ${entry.meshClientPid})`);
     }
 
-    if (opts["kill-session"] && terminal.sessionExists(entry.session)) {
-      terminal.killSession(entry.session);
-      console.log(`Killed session: ${entry.session}`);
+    if (opts["kill-session"]) {
+      const stopBackend = entry.backend ? createBackend(entry.backend as any) : terminal;
+      if (stopBackend.sessionExists(entry.session)) {
+        stopBackend.killSession(entry.session);
+        console.log(`Killed ${stopBackend.name} session: ${entry.session}`);
+      }
     }
 
     delete state[stopName];
