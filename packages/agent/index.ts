@@ -165,7 +165,7 @@ export async function runAgent(sub?: string, args?: string[]) {
       args: cmdArgs,
       options: {
         name: { type: "string" },
-        "kill-session": { type: "boolean", default: false },
+        "kill-session": { type: "boolean", default: true },
       },
       allowPositionals: true,
     });

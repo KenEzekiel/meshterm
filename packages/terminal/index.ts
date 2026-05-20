@@ -170,8 +170,9 @@ export class ZellijBackend implements TerminalBackend {
   }
 
   killSession(session: string): boolean {
-    const result = spawnSync([this.bin, "kill-session", session]);
-    return result.exitCode === 0;
+    spawnSync([this.bin, "kill-session", session]);
+    spawnSync([this.bin, "delete-session", session, "--force"]);
+    return !this.sessionExists(session);
   }
 
   attach(session: string): void {
