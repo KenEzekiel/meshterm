@@ -410,6 +410,28 @@ Bun.serve({
       return json({ ok: true, agent });
     }
 
+    // DELETE /agents/:name — unregister agent
+    const agentDeleteMatch = path.match(/^\/agents\/([^/]+)$/);
+    if (method === "DELETE" && agentDeleteMatch) {
+      const name = decodeURIComponent(agentDeleteMatch[1]);
+      if (!agents.has(name)) return json({ error: "agent not found" }, 404);
+      agents.delete(name);
+      agentStatus.delete(name);
+      persist();
+      return json({ ok: true, deleted: name });
+    }
+
+    // GET /agents/:name — agent detail
+    const agentDetailMatch = path.match(/^\/agents\/([^/]+)$/);
+    if (method === "GET" && agentDetailMatch) {
+      const name = decodeURIComponent(agentDetailMatch[1]);
+      const agent = agents.get(name);
+      if (!agent) return json({ error: "agent not found" }, 404);
+      const status = agentStatus.get(name) ?? null;
+      const history = messages.filter(m => m.from_agent === name || m.to_agent === name).slice(-20);
+      return json({ ...agent, status, recent_messages: history.length });
+    }
+
     // POST /agents/heartbeat { name }
     if (method === "POST" && path === "/agents/heartbeat") {
       const body = await req.json();
@@ -429,6 +451,36 @@ Bun.serve({
         });
       }
       return json({ ok: true });
+    }
+
+    // POST /agents/:name/state/reset
+    const agentStateResetMatch = path.match(/^\/agents\/([^/]+)\/state\/reset$/);
+    if (method === "POST" && agentStateResetMatch) {
+      const name = decodeURIComponent(agentStateResetMatch[1]);
+      if (!agents.has(name)) return json({ error: "agent not found" }, 404);
+      agentStatus.delete(name);
+      return json({ ok: true, agent: name, state: null });
+    }
+
+    // DELETE /messages/:id
+    const msgDeleteMatch = path.match(/^\/messages\/([^/]+)$/);
+    if (method === "DELETE" && msgDeleteMatch) {
+      const id = decodeURIComponent(msgDeleteMatch[1]);
+      const idx = messages.findIndex(m => m.id === id);
+      if (idx === -1) return json({ error: "message not found" }, 404);
+      messages.splice(idx, 1);
+      persist();
+      return json({ ok: true, deleted: id });
+    }
+
+    // DELETE /messages/purge?days=N
+    if (method === "DELETE" && path === "/messages/purge") {
+      const days = Number(url.searchParams.get("days") ?? 30);
+      const cutoff = Date.now() - days * 86400_000;
+      const before = messages.length;
+      messages = messages.filter(m => new Date(m.created_at).getTime() > cutoff);
+      persist();
+      return json({ ok: true, purged: before - messages.length, remaining: messages.length });
     }
 
     // --- Roles ---
