@@ -520,6 +520,30 @@ Bun.serve({
       return json(role);
     }
 
+    // DELETE /roles/:name
+    const roleDeleteMatch = path.match(/^\/roles\/([^/]+)$/);
+    if (method === "DELETE" && roleDeleteMatch) {
+      const name = decodeURIComponent(roleDeleteMatch[1]);
+      if (!roles.has(name)) return json({ error: "not found" }, 404);
+      roles.delete(name);
+      persist();
+      return json({ ok: true, deleted: name });
+    }
+
+    // PATCH /roles/:name/agents { add?: string[], remove?: string[] }
+    const roleAgentsMatch = path.match(/^\/roles\/([^/]+)\/agents$/);
+    if (method === "PATCH" && roleAgentsMatch) {
+      const name = decodeURIComponent(roleAgentsMatch[1]);
+      const role = roles.get(name);
+      if (!role) return json({ error: "not found" }, 404);
+      const body = await req.json();
+      if (body.add) role.agents = [...new Set([...role.agents, ...body.add])];
+      if (body.remove) role.agents = role.agents.filter((a: string) => !body.remove.includes(a));
+      role.priority = role.agents;
+      persist();
+      return json({ ok: true, role });
+    }
+
     // --- Messages ---
 
     // POST /messages { from_agent, to_agent, body, broadcast? }
@@ -793,10 +817,24 @@ Bun.serve({
         return json({ error: "room not found" }, 404);
       }
       rooms.delete(name);
-      // Remove room messages
       roomMessages = roomMessages.filter(m => m.room !== name);
       persist();
       return json({ ok: true });
+    }
+
+    // PATCH /rooms/:name { mode?, moderator?, members? }
+    const roomPatchMatch = path.match(/^\/rooms\/([^/]+)$/);
+    if (method === "PATCH" && roomPatchMatch) {
+      const name = decodeURIComponent(roomPatchMatch[1]);
+      const room = rooms.get(name);
+      if (!room) return json({ error: "room not found" }, 404);
+      const body = await req.json();
+      if (body.mode) room.mode = body.mode;
+      if (body.moderator !== undefined) room.moderator = body.moderator;
+      if (body.members) room.members = body.members;
+      room.last_activity = new Date().toISOString();
+      persist();
+      return json({ ok: true, room });
     }
 
     // POST /rooms/:name/join { agent }
