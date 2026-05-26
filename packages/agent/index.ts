@@ -103,9 +103,9 @@ export async function runAgent(sub?: string, args?: string[]) {
     if (!terminal.sessionExists(session)) {
       console.log(`Creating ${terminal.name} session: ${session}`);
       console.log(`Starting CLI: ${cli}`);
-      const env: Record<string, string> = {};
+      const env: Record<string, string> = { MESHTERM_AGENT: name };
       if (PROFILE) env.MESHTERM_PROFILE = PROFILE;
-      terminal.newSession(session, cli, Object.keys(env).length ? env : undefined);
+      terminal.newSession(session, cli, env);
     } else {
       console.log(`Session "${session}" already exists — skipping CLI launch (attach with: meshterm agent attach --name ${name})`);
     }
