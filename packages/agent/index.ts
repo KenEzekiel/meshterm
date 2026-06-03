@@ -105,6 +105,7 @@ export async function runAgent(sub?: string, args?: string[]) {
       console.log(`Starting CLI: ${cli}`);
       const env: Record<string, string> = { MESHTERM_AGENT: name };
       if (PROFILE) env.MESHTERM_PROFILE = PROFILE;
+      if (process.env.HINDSIGHT_BANK_ID) env.HINDSIGHT_BANK_ID = process.env.HINDSIGHT_BANK_ID;
       terminal.newSession(session, cli, env);
     } else {
       console.log(`Session "${session}" already exists — skipping CLI launch (attach with: meshterm agent attach --name ${name})`);
