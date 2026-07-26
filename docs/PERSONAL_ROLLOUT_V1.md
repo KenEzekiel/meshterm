@@ -2,6 +2,25 @@
 
 Status: approved for Ken's personal infrastructure rollout on 2026-07-26.
 
+## Live rollout snapshot
+
+Completed on 2026-07-26:
+
+- `meshterm-v1.service` is enabled and active on VPS loopback port 4210.
+- The store reports SQLite WAL, schema v2, and healthy readiness.
+- A live claim, service restart, lease-expiry redelivery, ack, and empty
+  subsequent claim passed.
+- `kiro-vps`, `mac-codex`, and `mac-claude` have independent active principals.
+- A persistent Mac launchd SSH tunnel exposes VPS loopback port 4210 locally.
+- A live `mac-codex` to `mac-claude` send/claim/ack roundtrip passed.
+- Claude Desktop was restarted and reports `meshterm-v1` as running.
+- Codex reports `meshterm-v1` enabled; its app restart is deferred because the
+  rollout itself is running inside the current Codex task.
+- Kiro received this brief and has a v1 profile, but its active legacy session
+  has not been restarted.
+- The public domain, legacy broker, and persistent delegation worker remain on
+  the legacy contract pending adapter migration.
+
 ## Read this first
 
 Meshterm v1 is a generic, durable transport. It no longer owns agent
