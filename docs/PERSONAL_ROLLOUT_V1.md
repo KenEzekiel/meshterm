@@ -85,6 +85,8 @@ remote MCP endpoint or Secure MCP Tunnel.
 
 - Provision only principals with an identified owner.
 - Deliver each credential directly into a mode-0600 local profile.
+- Until public cutover, Mac consumers reach the loopback-only v1 server through
+  `ops/tech.kennezekiel.meshterm-v1-tunnel.plist`.
 - Restart that consumer and verify send, claim, crash-before-ack, redelivery,
   ack, and empty subsequent claim.
 - Remove its legacy daemon/process only after v1 verification passes.
