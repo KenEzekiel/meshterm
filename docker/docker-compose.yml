@@ -3,24 +3,22 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: agent-mesh
+    container_name: meshterm
     restart: unless-stopped
     ports:
       - "127.0.0.1:4200:4200"
     volumes:
       - mesh-data:/data
-      # Optional: mount a config file for webhooks
-      # - ./mesh-config.json:/app/mesh-config.json:ro
     environment:
-      - MESH_SECRET=${MESH_SECRET:-mesh-dev-secret}
+      - MESH_OPERATOR_TOKEN=${MESH_OPERATOR_TOKEN:?MESH_OPERATOR_TOKEN must be set}
+      - MESH_HOST=0.0.0.0
       - MESH_PORT=4200
-      - MESH_STORE=/data/mesh-store.json
-      - MESH_WEBHOOKS=${MESH_WEBHOOKS:-}
+      - MESH_DATABASE=/data/meshterm.sqlite
 
 volumes:
   mesh-data:
 
-# To connect to external networks (e.g., nginx proxy manager),
+# To connect to a TLS reverse proxy,
 # create a docker-compose.override.yml:
 #
 #   services:

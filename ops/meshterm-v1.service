@@ -1,0 +1,23 @@
+[Unit]
+Description=Meshterm v1 durable transport
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ken
+WorkingDirectory=/home/ken/meshterm
+EnvironmentFile=/home/ken/.config/meshterm-v1/server.env
+ExecStart=/home/ken/.bun/bin/bun run /home/ken/meshterm/packages/server/server.ts
+Restart=always
+RestartSec=3
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ken/.local/share/meshterm-v1
+
+[Install]
+WantedBy=multi-user.target

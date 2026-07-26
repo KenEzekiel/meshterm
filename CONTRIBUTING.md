@@ -1,71 +1,37 @@
-# Contributing to meshterm
-
-Thanks for your interest in contributing!
-
-## Prerequisites
-
-- [Bun](https://bun.sh) >= 1.0.0
-- [tmux](https://github.com/tmux/tmux) (for testing daemon/client features)
+# Contributing to Meshterm
 
 ## Setup
 
+Requirements: Bun 1.3 or newer.
+
 ```bash
-git clone https://github.com/KenEzekiel/meshterm.git
-cd meshterm
-bun install
+bun install --frozen-lockfile
+bun run typecheck
+bun test
+bun run build
 ```
 
-## Project Structure
+## Structure
 
-```
+```text
 packages/
-├── server/server.ts    # HTTP message broker
-├── cli/index.ts        # Unified CLI entry point
-├── mcp/index.ts        # MCP server (stdio, for AI agents)
-├── client/mesh-client.ts  # tmux inject poller (daemon)
-├── agent/index.ts      # Agent lifecycle manager
-└── tui/index.ts        # Terminal dashboard
-skills/                 # Agent integration guides
-docker/                 # Docker deployment files
+├── server/server.ts     HTTP routing and process bootstrap
+├── server/transport.ts  SQLite transport state machine
+├── client/index.ts      Generic downstream client
+├── mcp/index.ts         STDIO MCP adapter
+└── cli/index.ts         CLI and Desktop configuration
 ```
 
-## Running Locally
+## Design constraints
 
-```bash
-# Start the server
-MESH_SECRET=dev-secret bun run packages/server/server.ts
+- Keep payloads opaque.
+- Derive sender identity from the credential.
+- Preserve at-least-once delivery and explicit ack-after-processing.
+- Use SQLite transactions for delivery transitions.
+- Never log payloads or credentials.
+- Keep task, repository, approval, execution, and result semantics downstream.
+- Do not add rooms, skills, TUI, terminal injection, or product telemetry back
+  into the core.
 
-# Run the CLI
-bun run packages/cli/index.ts --version
-bun run packages/cli/index.ts send my-agent "hello"
-
-# Start MCP server (stdio)
-bun run packages/cli/index.ts mcp
-```
-
-## Making Changes
-
-1. Fork the repo and create a feature branch
-2. Make your changes
-3. Test manually (no test suite yet — contributions welcome!)
-4. Commit with a descriptive message: `feat:`, `fix:`, `docs:`, `chore:`
-5. Open a PR against `main`
-
-## Code Style
-
-- TypeScript, Bun runtime
-- No external dependencies (use Bun built-ins and standard library)
-- Single-file-per-package pattern — keep packages focused
-- Match existing code style (no linter configured yet)
-
-## Areas Where Help is Wanted
-
-- **Tests** — server API tests, CLI tests, MCP protocol tests (Bun has a built-in test runner)
-- **CI/CD** — GitHub Actions for lint, test, auto-publish on tag
-- **WebSocket push** — replace polling for real-time message delivery
-- **Per-agent API keys** — currently one shared secret for all agents
-- **Standalone binary** — `bun build --compile` for zero-dependency distribution
-
-## License
-
-By contributing, you agree that your contributions will be licensed under the MIT License.
+Every behavior change needs a focused Bun test. Server API tests may require
+permission to bind a loopback port.

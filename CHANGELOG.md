@@ -2,6 +2,23 @@
 
 All notable changes to meshterm will be documented in this file.
 
+## [1.0.0] - 2026-07-26
+
+### Changed
+
+- Rebuilt storage around SQLite/WAL and transactional delivery state.
+- Added per-principal credentials and server-derived sender identity.
+- Added idempotent send, FIFO claim/lease, explicit ack/nack, retry, dead-letter,
+  restart recovery, readiness, and queue metrics.
+- Reduced MCP to explicit pull/ack tools and added Codex Desktop and
+  Claude Desktop setup.
+
+### Removed
+
+- Shared-secret sender claims, JSON snapshots, rooms, priority roles, skill
+  registry/transfer, task projections, TUI, webhooks, product telemetry, and
+  tmux/Zellij lifecycle or keystroke injection.
+
 ## [0.19.0] - 2026-05-04
 
 ### Added

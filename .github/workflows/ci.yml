@@ -16,20 +16,36 @@ jobs:
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
       - name: Type check
-        run: bun run tsc --noEmit 2>/dev/null || echo "Type check skipped (no strict config)"
+        run: bun run typecheck
+
+      - name: Test
+        run: bun test
+
+      - name: Build
+        run: bun run build
 
       - name: Test CLI loads
         run: bun run packages/cli/index.ts --version
 
-      - name: Test MCP server starts
-        run: |
-          timeout 3 bun run packages/mcp/index.ts 2>&1 || true
-          echo "MCP server starts OK (exited on stdin close)"
-
       - name: Test server starts
         run: |
-          MESH_SECRET=ci-test MESH_PORT=4200 bun run packages/server/server.ts &
-          sleep 2
-          curl -sf http://localhost:4200/health
-          kill %1 2>/dev/null || true
+          MESH_OPERATOR_TOKEN=ci-operator-token-with-at-least-32-characters \
+            MESH_DATABASE=/tmp/meshterm-ci.sqlite \
+            MESH_PORT=4200 \
+            bun run packages/server/server.ts &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          for attempt in {1..10}; do
+            if curl -sf http://localhost:4200/readyz; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+
+      - name: Build container
+        run: docker build -f docker/Dockerfile .

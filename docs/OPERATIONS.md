@@ -1,118 +1,88 @@
-# Operations Guide
+# Operations
 
-How to update, restart, and maintain meshterm components.
+## Runtime
 
-## Components Overview
+Meshterm is one Bun HTTP process and one SQLite database. The canonical
+self-hosted package path is Docker Compose. The existing personal VPS topology
+is a supervised bare Bun process; keep exactly one process owner (normally
+systemd) and remove any competing manually launched PID before migration.
 
-| Component | What it does | Where it runs |
-|-----------|-------------|---------------|
-| **CLI + MCP** | Send/receive messages, MCP tools for IDEs | Your machine (npm) |
-| **Agent** | tmux session + daemon that delivers messages | Your machine |
-| **Server** | HTTP message broker | VPS (Docker) |
-| **meshterm.live** | Managed service — provision API + tenant containers | Separate VPS |
+Required configuration:
 
-## Updating
+- `MESH_OPERATOR_TOKEN`: random operator credential, at least 32 characters.
+- `MESH_DATABASE`: SQLite path; default `./meshterm.sqlite`.
+- `MESH_HOST`: bind address; default `127.0.0.1`.
+- `MESH_PORT`: listen port; default `4200`.
 
-### CLI / MCP / Agent (any machine)
+Never put principal or operator credentials in command arguments, logs, message
+payloads, committed files, or support output.
 
-```bash
-npm update -g meshterm
-meshterm --version  # verify
-```
-
-Then restart the agent to pick up new code:
+## Docker Compose
 
 ```bash
-meshterm agent stop --name <agent-name>
-meshterm agent start --name <agent-name> --cli "<your-cli>" --session <tmux-session>
+export MESH_OPERATOR_TOKEN="$(openssl rand -hex 32)"
+docker compose -f docker/docker-compose.yml up -d --build
+curl -fsS http://127.0.0.1:4200/readyz
 ```
 
-MCP tools restart automatically when your IDE reconnects.
+The database and WAL files live in the `mesh-data` volume. Back up the database
+using SQLite's online backup mechanism or after cleanly stopping the process;
+do not copy only the main file while WAL writes are active.
 
-### Server (self-hosted, Docker)
+## Readiness and metrics
+
+- `GET /livez`: process liveness only.
+- `GET /readyz`: SQLite integrity, WAL mode, and schema version.
+- `GET /v1/metrics`: authenticated queue depth, oldest queued age, active
+  leases, retry count, dead letters, and average acknowledged latency.
+
+Structured logs contain IDs and state transitions only. Payloads and
+credentials are intentionally absent.
+
+## Recovery
+
+SQLite commits accepted sends before returning success. After an unclean stop:
+
+1. restart the service against the same database;
+2. require `/readyz` to return 200;
+3. allow active leases to expire;
+4. verify they are reclaimed with the same message and delivery IDs;
+5. inspect dead letters and queue age.
+
+Do not delete WAL/SHM files or replace a database while the process is running.
+
+## Credential rotation
+
+Issue a second credential for the same principal, update the client, verify the
+new credential can claim the existing mailbox, then revoke only the old
+credential ID:
 
 ```bash
-ssh <your-vps>
-cd ~/meshterm  # where docker-compose.yml lives
-git pull
-docker compose up -d --build
+meshterm admin credential issue agent-name --server https://mesh.example
+meshterm admin credential revoke old-credential-id --server https://mesh.example
 ```
 
-Messages in flight are preserved (stored in the JSON file / volume).
+Principal revocation is decommissioning, not rotation. It disables every
+credential and makes its mailbox unavailable until an operator applies an
+explicit message policy.
 
-### meshterm.live tenant servers
+Operator credentials are process configuration. Rotate them through the
+deployment secret store and restart the service.
 
-Existing tenant containers keep running their version. Only new provisions get the updated image.
+## Legacy bare-process migration
 
-To update the image:
+The live pre-v1 server uses `MESH_SECRET`, `MESH_STORE`, and a JSON snapshot.
+V1 uses `MESH_OPERATOR_TOKEN`, `MESH_DATABASE`, and principal credentials:
 
-```bash
-ssh root@<meshterm-live-vps>
-# Copy updated server.ts + telemetry.ts to /opt/meshterm-server/
-docker build -t meshterm-server /opt/meshterm-server/
-# New provisions now use the updated image
-```
+1. stop legacy Meshterm daemons, terminal injectors, and every manually launched
+   server process;
+2. preserve `mesh-store.json` as a read-only timestamped archive;
+3. configure one supervised v1 process with a new operator token and SQLite
+   path;
+4. start it once and require `/readyz` to report WAL and the current schema;
+5. provision one principal per agent/service and install its credential;
+6. replay only operator-reviewed unacknowledged legacy payloads with explicit
+   idempotency keys;
+7. keep the legacy JSON archive until the migration is reconciled.
 
-To update an existing tenant (if needed):
-
-```bash
-docker stop meshterm-tenant-<id>
-docker rm meshterm-tenant-<id>
-# Re-provision via API or manually re-run with same port/secret
-```
-
-## Agent Management
-
-```bash
-meshterm agent list                    # show running agents
-meshterm agent start --name <n> --cli "<cmd>" --session <s>
-meshterm agent stop --name <n>
-meshterm agent attach --name <n>       # attach to tmux session
-tmux attach -t <session>               # or attach directly
-```
-
-## Profiles
-
-Multiple configs on one machine:
-
-```bash
-meshterm init --profile work           # separate config
-meshterm status --profile work
-meshterm send --profile work <to> <msg>
-```
-
-Profiles are stored at `~/.meshterm/profiles/<name>.json`.
-
-### Connect IDE/CLI to a profile
-
-```bash
-# Adds "meshterm-work" MCP entry alongside the default "meshterm"
-meshterm setup kiro --profile work
-
-# Custom MCP entry name
-meshterm setup kiro --profile work --as meshterm-cloud
-```
-
-Both entries coexist. Responses from non-default profiles are prefixed with `[profile]`.
-
-### Agents with profiles
-
-```bash
-meshterm agent start --profile work --name work-agent --cli "kiro-cli chat --classic"
-```
-
-The profile flows to the tmux session, CLI, and MCP automatically.
-
-### Switching profiles
-
-Re-run `meshterm setup` to change which profile an IDE uses. The previous entry is overwritten with the new profile.
-
-## Troubleshooting
-
-**Agent shows `⚠️ no mesh-client`:** The daemon died. Stop and restart the agent.
-
-**`meshterm agent list` doesn't show a running agent:** The agent was started outside of `meshterm agent start`. Restart it via the command to register it.
-
-**Lost your meshterm.live secret:** Anonymous servers can't be recovered. Provision a new one with `meshterm init`.
-
-**MCP tools not working in IDE:** Restart the IDE or run `MCP: List Servers` → restart meshterm.
+Do not silently infer principals from caller-supplied legacy sender names.

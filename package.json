@@ -1,29 +1,36 @@
 {
   "name": "meshterm",
-  "version": "0.22.10",
-  "description": "Agent-agnostic communication layer for AI agents",
+  "version": "1.0.0",
+  "description": "Authenticated durable transport for agents and services",
   "type": "module",
   "bin": {
     "meshterm": "./bin/meshterm.mjs"
   },
   "files": [
     "bin/",
-    "packages/",
-    "skills/",
+    "packages/cli/index.ts",
+    "packages/client/index.ts",
+    "packages/mcp/index.ts",
+    "packages/server/server.ts",
+    "packages/server/transport.ts",
+    "docs/",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "server": "bun run packages/server/server.ts",
-    "client": "bun run packages/client/mesh-client.ts",
-    "agent": "bun run packages/agent/index.ts"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "build": "bun build packages/cli/index.ts packages/client/index.ts packages/server/server.ts packages/mcp/index.ts --outdir dist --target bun",
+    "verify:transport-v1": "bun test packages/server/transport.test.ts packages/mcp/index.test.ts packages/cli/security.test.ts"
   },
   "keywords": [
     "ai",
-    "agents",
-    "mesh",
-    "communication",
-    "tmux",
+    "transport",
+    "queue",
+    "sqlite",
     "mcp"
   ],
   "author": "Ken Ezekiel",
@@ -34,5 +41,9 @@
   },
   "engines": {
     "bun": ">=1.0.0"
+  },
+  "devDependencies": {
+    "bun-types": "1.3.13",
+    "typescript": "5.7.3"
   }
 }
