@@ -73,6 +73,10 @@ meshterm principals
 meshterm channel create <name> --members alice,bob
 ```
 
+`status` can also use a credentialless external status broker. See
+[the host-neutral status broker contract](docs/STATUS_BROKER.md). Meshterm core
+does not own the broker's credential custody or local authorization policy.
+
 `claim` leases messages but does not acknowledge them. Ack only after durable,
 successful processing.
 

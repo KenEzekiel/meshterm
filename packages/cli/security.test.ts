@@ -185,3 +185,29 @@ describe("credential storage and Desktop integration", () => {
     ).toBe("work");
   });
 });
+
+describe("credentialless broker mode", () => {
+  test("does not load or fall back to a credential profile", () => {
+    const directory = tempDirectory();
+    const result = run(["status", "--broker-socket", "relative.sock"], {
+      MESHTERM_CONFIG_DIR: directory,
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      "broker socket must be an absolute path",
+    );
+    expect(result.stderr.toString()).not.toContain("config not found");
+  });
+
+  test("rejects a missing broker socket value without direct-mode fallback", () => {
+    const directory = tempDirectory();
+    const result = run(["status", "--broker-socket"], {
+      MESHTERM_CONFIG_DIR: directory,
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      "usage: meshterm status --broker-socket",
+    );
+    expect(result.stderr.toString()).not.toContain("config not found");
+  });
+});
