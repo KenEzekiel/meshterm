@@ -10,6 +10,7 @@
     "bin/",
     "packages/cli/index.ts",
     "packages/client/index.ts",
+    "packages/client/broker.ts",
     "packages/mcp/index.ts",
     "packages/server/server.ts",
     "packages/server/transport.ts",
@@ -23,7 +24,7 @@
     "server": "bun run packages/server/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "build": "bun build packages/cli/index.ts packages/client/index.ts packages/server/server.ts packages/mcp/index.ts --outdir dist --target bun",
+    "build": "bun build packages/cli/index.ts packages/client/index.ts packages/client/broker.ts packages/server/server.ts packages/mcp/index.ts --outdir dist --target bun",
     "verify:transport-v1": "bun test packages/server/transport.test.ts packages/mcp/index.test.ts packages/cli/security.test.ts"
   },
   "keywords": [

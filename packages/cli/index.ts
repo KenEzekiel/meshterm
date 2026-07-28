@@ -10,6 +10,7 @@ import {
 import { homedir } from "os";
 import { dirname, join, resolve } from "path";
 import { randomUUID } from "crypto";
+import { requestStatusViaBroker } from "../client/broker";
 
 interface Config {
   server: string;
@@ -321,6 +322,19 @@ export async function runCli(): Promise<void> {
       break;
     }
     case "status": {
+      if (flag("broker-socket") && option("broker-socket") === undefined) {
+        throw new Error("usage: meshterm status --broker-socket /absolute/path");
+      }
+      const brokerSocket =
+        option("broker-socket") ?? process.env.MESHTERM_BROKER_SOCKET;
+      if (brokerSocket) {
+        print({
+          broker: "local",
+          metrics_scope: "authenticated_principal",
+          status: await requestStatusViaBroker(brokerSocket),
+        });
+        break;
+      }
       const config = loadConfig();
       const [ready, metrics] = await Promise.all([
         fetch(`${config.server}/readyz`).then((response) => response.json()),
@@ -503,7 +517,7 @@ Core:
   message <message-id>
   history [--limit n] [--cursor value]
   delete <message-id>  # sender only, after all deliveries are terminal
-  status
+  status [--broker-socket /absolute/path]
   principals
   channel list
   channel create <name> --members a,b
