@@ -1,6 +1,7 @@
 import { AgentError, safeMessage } from "./runtime";
 import { ensureSession, type AgentSession } from "./runtime";
 import { callTool, result, TOOLS } from "./tools";
+import { receiveWithRecovery } from "./recovery";
 
 // Structural host boundary: no runtime dependency on Pi in other CLI agents.
 interface Context {
@@ -65,17 +66,23 @@ export default function meshterm(pi: PiAPI) {
     description: "Meshterm session address and explicit listen mode: /mesh [listen|stop]",
     async handler(args, ctx) {
       const current = requireSession();
-      if (args.trim() === "stop") { await stop(); ctx.ui.notify("Meshterm listener stopped."); return; }
+      if (args.trim() === "stop") { await stop(); ctx.ui.setStatus("meshterm", current.principal.name); ctx.ui.notify("Meshterm listener stopped."); return; }
       if (!args.trim()) { ctx.ui.notify(`Meshterm address: ${current.principal.name}`); return; }
       if (args.trim() !== "listen") throw new AgentError("Use /mesh, /mesh listen, or /mesh stop");
       if (listening) { ctx.ui.notify("Meshterm is already listening."); return; }
       const controller = new AbortController(); listening = controller;
+      ctx.ui.setStatus("meshterm", `${current.principal.name} · listening`);
       listener = (async () => {
         while (!controller.signal.aborted) {
           if (!ctx.isIdle() || deliveries.size) {
             await new Promise(resolve => setTimeout(resolve, 200)); continue;
           }
-          const item = await current.wait({ timeoutMs: 5000, signal: controller.signal });
+          const item = await receiveWithRecovery(current, controller.signal, (recovering, attempt) => {
+            ctx.ui.setStatus("meshterm", `${current.principal.name} · ${recovering ? "reconnecting" : "listening"}`);
+            ctx.ui.notify(recovering
+              ? `Meshterm connection interrupted. Waiting 121 seconds for any uncertain lease to expire, then reconnecting (${attempt}/2). /mesh stop cancels recovery.`
+              : "Meshterm connection restored; listening resumed.", recovering ? "warning" : "info");
+          });
           if (!item) continue;
           if (controller.signal.aborted) { await current.nack(item.delivery_id); break; }
           deliveries.add(item.delivery_id);
@@ -85,7 +92,7 @@ export default function meshterm(pi: PiAPI) {
             display: true,
           }, { triggerTurn: true, deliverAs: "followUp" });
         }
-      })().catch((error) => { if (!controller.signal.aborted) ctx.ui.notify(`Meshterm listener stopped: ${safeMessage(error)} Use /mesh stop then /mesh listen to retry.`, "error"); });
+      })().catch((error) => { if (!controller.signal.aborted) { ctx.ui.setStatus("meshterm", `${current.principal.name} · stopped`); ctx.ui.notify(`Meshterm listener stopped: ${safeMessage(error)} Use /mesh stop then /mesh listen to retry.`, "error"); } });
       ctx.ui.notify("Meshterm listening. Incoming messages may start a Pi turn; processing uses model tokens, waiting does not.");
     },
   });
