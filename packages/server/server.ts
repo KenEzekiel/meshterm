@@ -104,6 +104,9 @@ export function startServer(options: ServerOptions = {}) {
         const isOperator =
           token.length > 0 && safeEqual(token, operatorToken);
         const principal = isOperator ? null : store.authenticate(token);
+        const registrationGrant = isOperator
+          ? null
+          : store.authenticateRegistrationGrant(token);
 
         if (path.startsWith("/v1/operator/")) {
           if (!isOperator) {
@@ -124,6 +127,34 @@ export function startServer(options: ServerOptions = {}) {
               principal_id: created.principal.id,
             });
             return json(created, 201, requestId);
+          }
+          if (
+            req.method === "POST" &&
+            path === "/v1/operator/registration-grants"
+          ) {
+            const input = await body(req);
+            const grant = store.createRegistrationGrant(
+              String(input.namespace ?? ""),
+              Number(input.max_principals),
+              String(input.expires_at ?? ""),
+            );
+            log("registration_grant.created", {
+              request_id: requestId,
+              grant_id: grant.grant_id,
+            });
+            return json(grant, 201, requestId);
+          }
+          const revokeRegistrationGrantMatch = path.match(
+            /^\/v1\/operator\/registration-grants\/([^/]+)$/,
+          );
+          if (req.method === "DELETE" && revokeRegistrationGrantMatch) {
+            store.revokeRegistrationGrant(
+              decodeURIComponent(revokeRegistrationGrantMatch[1]),
+            );
+            log("registration_grant.revoked", {
+              request_id: requestId,
+            });
+            return json({ ok: true }, 200, requestId);
           }
           const revokeMatch = path.match(
             /^\/v1\/operator\/principals\/([^/]+)\/revoke$/,
@@ -192,10 +223,82 @@ export function startServer(options: ServerOptions = {}) {
           );
         }
 
+        if (path === "/v1/registrations") {
+          if (!registrationGrant) {
+            return json(
+              {
+                error: {
+                  code: principal
+                    ? "registration_grant_required"
+                    : "unauthorized",
+                  message: principal
+                    ? "registration grant credential required"
+                    : "valid registration grant credential required",
+                },
+              },
+              principal ? 403 : 401,
+              requestId,
+            );
+          }
+          store.assertRegistrationGrantUsable(registrationGrant);
+          if (req.method === "GET") {
+            return json(
+              {
+                principals: store.listRegistrationPrincipals(registrationGrant),
+              },
+              200,
+              requestId,
+            );
+          }
+          if (req.method === "POST") {
+            const input = await body(req);
+            const result = store.registerPrincipal(
+              registrationGrant,
+              String(input.registration_key ?? ""),
+              String(input.label ?? ""),
+              String(input.credential ?? ""),
+            );
+            log("registration.created", {
+              request_id: requestId,
+              grant_id: registrationGrant.id,
+              principal_id: result.principal.id,
+              duplicate: result.duplicate,
+            });
+            return json(result, result.duplicate ? 200 : 201, requestId);
+          }
+          return json(
+            { error: { code: "not_found", message: "route not found" } },
+            404,
+            requestId,
+          );
+        }
+
+        if (registrationGrant) {
+          return json(
+            {
+              error: {
+                code: "registration_grant_scope",
+                message: "registration grant is limited to registration endpoints",
+              },
+            },
+            403,
+            requestId,
+          );
+        }
+
         if (!principal) {
           return json(
             { error: { code: "unauthorized", message: "valid bearer credential required" } },
             401,
+            requestId,
+          );
+        }
+
+        if (req.method === "GET" && path === "/v1/me") {
+          const { id, name, kind, status } = principal;
+          return json(
+            { principal: { id, name, kind, status } },
+            200,
             requestId,
           );
         }
@@ -321,6 +424,22 @@ export function startServer(options: ServerOptions = {}) {
             request_id: requestId,
             principal_id: principal.id,
             delivery_id: ackMatch[1],
+          });
+          return json(result, 200, requestId);
+        }
+        const renewMatch = path.match(/^\/v1\/deliveries\/([^/]+)\/renew$/);
+        if (req.method === "POST" && renewMatch) {
+          const input = await body(req);
+          const result = store.renewLease(
+            principal,
+            decodeURIComponent(renewMatch[1]),
+            String(input.lease_token ?? ""),
+            Number(input.lease_seconds),
+          );
+          log("delivery.renewed", {
+            request_id: requestId,
+            principal_id: principal.id,
+            delivery_id: renewMatch[1],
           });
           return json(result, 200, requestId);
         }

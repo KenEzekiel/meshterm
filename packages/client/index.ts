@@ -64,6 +64,13 @@ export class MeshtermClientError extends Error {
   }
 }
 
+export class MeshtermClaimTimeoutError extends Error {
+  constructor() {
+    super("Claim request timed out; the server may have leased a delivery. Stop receiving and retry after the lease expires.");
+    this.name = "MeshtermClaimTimeoutError";
+  }
+}
+
 export class MeshtermClient {
   readonly #server: string;
   readonly #credential: string;
@@ -144,12 +151,10 @@ export class MeshtermClient {
     while (true) {
       throwIfAborted(waitOptions.signal);
       if (timeoutMs > 0 && Date.now() >= deadline) return null;
-      const remainingMs = deadline - Date.now();
-      const requestTimeoutMs = Math.max(
-        1,
-        Math.min(this.#timeoutMs, timeoutMs === 0 ? this.#timeoutMs : remainingMs),
-      );
-      const requestSignal = createRequestSignal(waitOptions.signal, requestTimeoutMs);
+      // The wait budget controls starting polls, not aborting a mutating claim.
+      // Finish an in-flight request within its own network timeout so a leased
+      // delivery is not discarded just because the overall wait budget elapsed.
+      const requestSignal = createRequestSignal(waitOptions.signal, this.#timeoutMs);
       let result: { items: ClaimedDelivery[] } | undefined;
       try {
         result =
@@ -163,9 +168,9 @@ export class MeshtermClient {
       } catch (error) {
         if (waitOptions.signal?.aborted) throw abortError();
         if (requestSignal.signal.aborted) {
-          if (timeoutMs === 0 || Date.now() >= deadline) return null;
-          // A single poll may hit the client's request timeout before the
-          // bounded wait expires. Continue polling until the wait deadline.
+          // Its outcome is unknown. Retrying silently can repeatedly lease and
+          // lose the same delivery until its attempt budget is exhausted.
+          throw new MeshtermClaimTimeoutError();
         } else {
           throw error;
         }
@@ -259,6 +264,17 @@ export class MeshtermClient {
     const query = new URLSearchParams({ limit: String(limit) });
     if (cursor) query.set("cursor", cursor);
     return this.request(`/v1/history?${query}`);
+  }
+
+  async identity(): Promise<{ principal: { id: string; name: string; kind: string; status: string } }> {
+    return this.request("/v1/me");
+  }
+
+  async renew(deliveryId: string, leaseToken: string, leaseSeconds = 120): Promise<{ lease_expires_at: string }> {
+    return this.request(`/v1/deliveries/${encodeURIComponent(deliveryId)}/renew`, {
+      method: "POST",
+      body: JSON.stringify({ lease_token: leaseToken, lease_seconds: leaseSeconds }),
+    });
   }
 
   async metrics(): Promise<any> {

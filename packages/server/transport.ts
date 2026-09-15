@@ -17,6 +17,23 @@ export interface AuthenticatedPrincipal extends Principal {
   credential_id: string;
 }
 
+export interface PrincipalSummary {
+  id: string;
+  name: string;
+  kind: PrincipalKind;
+  status: "active" | "revoked";
+}
+
+export interface RegistrationGrant {
+  id: string;
+  namespace: string;
+  max_principals: number;
+  expires_at: string;
+  status: "active" | "revoked";
+  created_at: string;
+  revoked_at: string | null;
+}
+
 export interface SendInput {
   to: { kind: "principal" | "channel"; name: string };
   payload: string;
@@ -58,11 +75,17 @@ export class TransportError extends Error {
 }
 
 const principalPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const boundedNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const registrationCredentialPattern =
+  /^mtk_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.([0-9a-f]{64})$/;
+const registrationGrantCredentialPattern =
+  /^mtrg_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.([0-9a-f]{64})$/;
 const idempotencyPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
 const MAX_ATTRIBUTES_BYTES = 16 * 1024;
 const MAX_CLAIM_BYTES = 5 * 1024 * 1024;
-export const LATEST_SCHEMA_VERSION = 2;
+export const LATEST_SCHEMA_VERSION = 3;
 
 function iso(ms: number): string {
   return new Date(ms).toISOString();
@@ -141,6 +164,17 @@ function parseJsonRecord(value: string | null): Record<string, unknown> | null {
   return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
     ? (parsed as Record<string, unknown>)
     : null;
+}
+
+function summarizePrincipal(
+  principal: Pick<Principal, "id" | "name" | "kind" | "status">,
+): PrincipalSummary {
+  return {
+    id: principal.id,
+    name: principal.name,
+    kind: principal.kind,
+    status: principal.status,
+  };
 }
 
 export class TransportStore {
@@ -243,6 +277,28 @@ export class TransportStore {
         reason_code TEXT,
         UNIQUE(delivery_id, attempt_number)
       );
+      CREATE TABLE IF NOT EXISTS registration_grants (
+        id TEXT PRIMARY KEY,
+        namespace TEXT NOT NULL UNIQUE,
+        secret_hash BLOB NOT NULL UNIQUE,
+        max_principals INTEGER NOT NULL CHECK(max_principals BETWEEN 1 AND 1000),
+        expires_at TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('active','revoked')),
+        created_at TEXT NOT NULL,
+        revoked_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS registrations (
+        id TEXT PRIMARY KEY,
+        grant_id TEXT NOT NULL REFERENCES registration_grants(id),
+        registration_key TEXT NOT NULL,
+        label TEXT NOT NULL,
+        principal_id TEXT NOT NULL UNIQUE REFERENCES principals(id),
+        credential_id TEXT NOT NULL UNIQUE REFERENCES credentials(id),
+        created_at TEXT NOT NULL,
+        UNIQUE(grant_id, registration_key)
+      );
+      CREATE INDEX IF NOT EXISTS registrations_grant_idx
+        ON registrations(grant_id, created_at, id);
       INSERT OR IGNORE INTO schema_migrations(version, applied_at)
         VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
       COMMIT;
@@ -258,6 +314,11 @@ export class TransportStore {
     this.db
       .query(
         `INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES (2,?)`,
+      )
+      .run(iso(Date.now()));
+    this.db
+      .query(
+        `INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES (3,?)`,
       )
       .run(iso(Date.now()));
   }
@@ -320,6 +381,321 @@ export class TransportStore {
       credential_id: credentialId,
       credential,
     };
+  }
+
+  createRegistrationGrant(
+    namespace: string,
+    maxPrincipals: number,
+    expiresAt: string,
+    now = Date.now(),
+  ): { grant_id: string; credential: string } {
+    if (!boundedNamePattern.test(namespace)) {
+      throw new TransportError(
+        400,
+        "invalid_registration_namespace",
+        "namespace must be 1 to 32 safe characters",
+      );
+    }
+    if (
+      !Number.isInteger(maxPrincipals) ||
+      maxPrincipals < 1 ||
+      maxPrincipals > 1000
+    ) {
+      throw new TransportError(
+        400,
+        "invalid_registration_quota",
+        "max_principals must be between 1 and 1000",
+      );
+    }
+    if (!isStrictIsoTimestamp(expiresAt)) {
+      throw new TransportError(
+        400,
+        "invalid_registration_expiry",
+        "expires_at must be an ISO timestamp",
+      );
+    }
+    const expiration = new Date(expiresAt);
+    if (expiration.getTime() <= now) {
+      throw new TransportError(
+        400,
+        "invalid_registration_expiry",
+        "expires_at must be in the future",
+      );
+    }
+    const grantId = randomUUID();
+    const credential = `mtrg_${grantId}.${randomBytes(32).toString("hex")}`;
+    const timestamp = iso(now);
+    try {
+      this.db.transaction(() => {
+        this.db
+          .query(
+            `INSERT INTO registration_grants(
+               id,namespace,secret_hash,max_principals,expires_at,status,created_at
+             ) VALUES (?,?,?,?,?,'active',?)`,
+          )
+          .run(
+            grantId,
+            namespace,
+            digest(credential),
+            maxPrincipals,
+            expiration.toISOString(),
+            timestamp,
+          );
+      })();
+    } catch (error) {
+      if (String(error).includes("UNIQUE")) {
+        throw new TransportError(
+          409,
+          "registration_namespace_exists",
+          "registration namespace already exists",
+        );
+      }
+      throw error;
+    }
+    return { grant_id: grantId, credential };
+  }
+
+  authenticateRegistrationGrant(
+    credential: string,
+  ): RegistrationGrant | null {
+    if (
+      !credential.startsWith("mtrg_") ||
+      credential.length > 256
+    ) {
+      return null;
+    }
+    const match = registrationGrantCredentialPattern.exec(credential);
+    if (!match) return null;
+    const row = this.db
+      .query(
+        `SELECT id,namespace,max_principals,expires_at,status,created_at,revoked_at,
+                secret_hash
+         FROM registration_grants WHERE id=?`,
+      )
+      .get(match[1]) as
+      | (RegistrationGrant & { secret_hash: Uint8Array })
+      | null;
+    if (!row || !equalDigest(digest(credential), Buffer.from(row.secret_hash))) {
+      return null;
+    }
+    const { secret_hash: _secretHash, ...grant } = row;
+    return grant;
+  }
+
+  assertRegistrationGrantUsable(
+    grant: RegistrationGrant,
+    now = Date.now(),
+  ): void {
+    const current = this.db
+      .query(
+        `SELECT id,namespace,max_principals,expires_at,status,created_at,revoked_at
+         FROM registration_grants WHERE id=?`,
+      )
+      .get(grant.id) as RegistrationGrant | null;
+    if (!current || current.status === "revoked") {
+      throw new TransportError(
+        403,
+        current ? "registration_grant_revoked" : "registration_grant_inactive",
+        current ? "registration grant is revoked" : "registration grant is not active",
+      );
+    }
+    if (new Date(current.expires_at).getTime() <= now) {
+      throw new TransportError(
+        403,
+        "registration_grant_expired",
+        "registration grant is expired",
+      );
+    }
+  }
+
+  revokeRegistrationGrant(grantId: string, now = Date.now()): void {
+    const result = this.db
+      .query(
+        `UPDATE registration_grants SET status='revoked',revoked_at=?
+         WHERE id=? AND status='active'`,
+      )
+      .run(iso(now), grantId);
+    if (result.changes === 0) {
+      throw new TransportError(
+        404,
+        "registration_grant_not_found",
+        "active registration grant not found",
+      );
+    }
+  }
+
+  registerPrincipal(
+    grant: RegistrationGrant,
+    registrationKey: string,
+    label: string,
+    credential: string,
+    now = Date.now(),
+  ): { principal: PrincipalSummary; duplicate: boolean } {
+    if (!uuidPattern.test(registrationKey)) {
+      throw new TransportError(
+        400,
+        "invalid_registration_key",
+        "registration_key must be a UUID",
+      );
+    }
+    if (!boundedNamePattern.test(label)) {
+      throw new TransportError(
+        400,
+        "invalid_registration_label",
+        "label must be 1 to 32 safe characters",
+      );
+    }
+    const credentialMatch = registrationCredentialPattern.exec(credential);
+    if (!credentialMatch) {
+      throw new TransportError(
+        400,
+        "invalid_registration_credential",
+        "credential must be an mtk UUID credential",
+      );
+    }
+    const credentialId = credentialMatch[1];
+    const credentialHash = digest(credential);
+    const timestamp = iso(now);
+    let result: { principal: PrincipalSummary; duplicate: boolean } | undefined;
+    try {
+      this.db.transaction(() => {
+        const currentGrant = this.db
+          .query(
+            `SELECT id,namespace,max_principals,expires_at,status,created_at,revoked_at
+             FROM registration_grants WHERE id=?`,
+          )
+          .get(grant.id) as RegistrationGrant | null;
+        if (!currentGrant) {
+          throw new TransportError(
+            403,
+            "registration_grant_inactive",
+            "registration grant is not active",
+          );
+        }
+        this.assertRegistrationGrantUsable(currentGrant, now);
+
+        const existing = this.db
+          .query(
+            `SELECT r.label,r.credential_id,
+                    p.id,p.name,p.kind,p.status,c.secret_hash
+             FROM registrations r
+             JOIN principals p ON p.id=r.principal_id
+             JOIN credentials c ON c.id=r.credential_id
+             WHERE r.grant_id=? AND r.registration_key=?`,
+          )
+          .get(grant.id, registrationKey) as
+          | {
+              label: string;
+              credential_id: string;
+              id: string;
+              name: string;
+              kind: PrincipalKind;
+              status: "active" | "revoked";
+              secret_hash: Uint8Array;
+            }
+          | null;
+        if (existing) {
+          if (
+            existing.label !== label ||
+            existing.credential_id !== credentialId ||
+            !equalDigest(credentialHash, Buffer.from(existing.secret_hash))
+          ) {
+            throw new TransportError(
+              409,
+              "registration_conflict",
+              "registration key is already registered with different input",
+            );
+          }
+          result = {
+            principal: summarizePrincipal(existing),
+            duplicate: true,
+          };
+          return;
+        }
+
+        const count = this.db
+          .query("SELECT COUNT(*) AS count FROM registrations WHERE grant_id=?")
+          .get(grant.id) as { count: number };
+        if (count.count >= currentGrant.max_principals) {
+          throw new TransportError(
+            409,
+            "registration_quota_exhausted",
+            "registration grant quota exhausted",
+          );
+        }
+
+        const principalId = randomUUID();
+        const principalName = `${currentGrant.namespace}-${label}-${createHash(
+          "sha256",
+        )
+          .update(registrationKey)
+          .digest("hex")
+          .slice(0, 12)}`;
+        this.db
+          .query(
+            `INSERT INTO principals(id,name,kind,status,created_at,updated_at)
+             VALUES (?,?,?,'active',?,?)`,
+          )
+          .run(principalId, principalName, "agent", timestamp, timestamp);
+        this.db
+          .query(
+            `INSERT INTO credentials(id,principal_id,secret_hash,status,created_at)
+             VALUES (?,?,?,'active',?)`,
+          )
+          .run(credentialId, principalId, credentialHash, timestamp);
+        this.db
+          .query(
+            `INSERT INTO registrations(
+               id,grant_id,registration_key,label,principal_id,credential_id,created_at
+             ) VALUES (?,?,?,?,?,?,?)`,
+          )
+          .run(
+            randomUUID(),
+            grant.id,
+            registrationKey,
+            label,
+            principalId,
+            credentialId,
+            timestamp,
+          );
+        result = {
+          principal: {
+            id: principalId,
+            name: principalName,
+            kind: "agent",
+            status: "active",
+          },
+          duplicate: false,
+        };
+      }).immediate();
+    } catch (error) {
+      if (error instanceof TransportError) throw error;
+      if (String(error).includes("UNIQUE")) {
+        throw new TransportError(
+          409,
+          "registration_conflict",
+          "registration could not be created",
+        );
+      }
+      throw error;
+    }
+    return result!;
+  }
+
+  listRegistrationPrincipals(
+    grant: RegistrationGrant,
+    now = Date.now(),
+  ): PrincipalSummary[] {
+    this.assertRegistrationGrantUsable(grant, now);
+    return this.db
+      .query(
+        `SELECT p.id,p.name,p.kind,p.status
+         FROM registrations r JOIN principals p ON p.id=r.principal_id
+         WHERE r.grant_id=?
+         ORDER BY r.created_at,r.id
+         LIMIT ?`,
+      )
+      .all(grant.id, grant.max_principals) as PrincipalSummary[];
   }
 
   issueCredential(
@@ -1087,6 +1463,70 @@ export class TransportStore {
       throw new TransportError(409, "stale_lease", "lease is not active");
     }
     return delivery;
+  }
+
+  renewLease(
+    recipient: AuthenticatedPrincipal,
+    deliveryId: string,
+    leaseToken: string,
+    leaseSeconds: number,
+    now = Date.now(),
+  ): { lease_expires_at: string } {
+    if (
+      !Number.isInteger(leaseSeconds) ||
+      leaseSeconds < 1 ||
+      leaseSeconds > 3600
+    ) {
+      throw new TransportError(
+        400,
+        "invalid_lease",
+        "lease_seconds must be between 1 and 3600",
+      );
+    }
+    const timestamp = iso(now);
+    let result: { lease_expires_at: string } | undefined;
+    this.db.transaction(() => {
+      const delivery = this.getLease(
+        recipient,
+        deliveryId,
+        leaseToken,
+        timestamp,
+      );
+      if (
+        delivery.state !== "leased" ||
+        !delivery.lease_expires_at ||
+        !delivery.lease_token_hash
+      ) {
+        throw new TransportError(409, "stale_lease", "lease is not active");
+      }
+      const currentExpiry = new Date(delivery.lease_expires_at).getTime();
+      const requestedExpiry = now + leaseSeconds * 1000;
+      const leaseExpiresAt = iso(Math.max(currentExpiry, requestedExpiry));
+      const updated = this.db
+        .query(
+          `UPDATE deliveries SET lease_expires_at=?
+           WHERE id=? AND recipient_id=? AND state='leased'
+             AND lease_expires_at>? AND lease_token_hash=?`,
+        )
+        .run(
+          leaseExpiresAt,
+          deliveryId,
+          recipient.id,
+          timestamp,
+          Buffer.from(delivery.lease_token_hash),
+        );
+      if (updated.changes !== 1) {
+        throw new TransportError(409, "stale_lease", "lease is not active");
+      }
+      this.db
+        .query(
+          `UPDATE delivery_attempts SET lease_expires_at=?
+           WHERE delivery_id=? AND attempt_number=? AND finished_at IS NULL`,
+        )
+        .run(leaseExpiresAt, deliveryId, delivery.attempt_count);
+      result = { lease_expires_at: leaseExpiresAt };
+    }).immediate();
+    return result!;
   }
 
   acknowledge(

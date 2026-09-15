@@ -13,6 +13,6 @@
     "allowSyntheticDefaultImports": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["packages/**/*"],
+  "include": ["packages/**/*", "integrations/agents/**/*.ts"],
   "exclude": ["node_modules"]
 }

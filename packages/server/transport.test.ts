@@ -663,3 +663,216 @@ describe("durable transport contract", () => {
     store.close();
   });
 });
+
+describe("scoped registration grants", () => {
+  function clientCredential(id: string, fill = "a"): string {
+    return `mtk_${id}.${fill.repeat(64)}`;
+  }
+
+  test("validates bounded namespaces, quotas, and global namespace uniqueness", () => {
+    const { store } = createStore();
+    const expiresAt = new Date(10_000).toISOString();
+    expect(() => store.createRegistrationGrant("", 1, expiresAt, 0)).toThrow(
+      new TransportError(
+        400,
+        "invalid_registration_namespace",
+        "namespace must be 1 to 32 safe characters",
+      ),
+    );
+    expect(() =>
+      store.createRegistrationGrant("namespace-that-is-too-long-for-the-contract", 1, expiresAt, 0),
+    ).toThrow();
+    expect(() => store.createRegistrationGrant("valid", 0, expiresAt, 0)).toThrow();
+    expect(() => store.createRegistrationGrant("valid", 1001, expiresAt, 0)).toThrow();
+    const grantCredential = store.createRegistrationGrant("valid", 1, expiresAt, 0).credential;
+    const grant = store.authenticateRegistrationGrant(grantCredential)!;
+    expect(() => store.assertRegistrationGrantUsable(grant, 10_000)).toThrow(
+      new TransportError(
+        403,
+        "registration_grant_expired",
+        "registration grant is expired",
+      ),
+    );
+    expect(() => store.createRegistrationGrant("valid", 1, expiresAt, 0)).toThrow(
+      new TransportError(
+        409,
+        "registration_namespace_exists",
+        "registration namespace already exists",
+      ),
+    );
+    store.close();
+  });
+
+  test("registers atomically, returns idempotent retries, and enforces quota", () => {
+    const { store } = createStore();
+    const grantCredential = store.createRegistrationGrant(
+      "sessions",
+      1,
+      new Date(10_000).toISOString(),
+      0,
+    ).credential;
+    const grant = store.authenticateRegistrationGrant(grantCredential)!;
+    const key = "00000000-0000-0000-0000-000000000001";
+    const credential = clientCredential("00000000-0000-0000-0000-000000000002");
+    const created = store.registerPrincipal(grant, key, "first", credential, 0);
+    expect(created).toMatchObject({
+      duplicate: false,
+      principal: {
+        name: "sessions-first-7ac1b8d7010b",
+        kind: "agent",
+        status: "active",
+      },
+    });
+    expect(store.registerPrincipal(grant, key, "first", credential, 1)).toEqual({
+      principal: created.principal,
+      duplicate: true,
+    });
+    expect(() =>
+      store.registerPrincipal(grant, key, "changed", credential, 1),
+    ).toThrow(
+      new TransportError(
+        409,
+        "registration_conflict",
+        "registration key is already registered with different input",
+      ),
+    );
+    expect(() =>
+      store.registerPrincipal(
+        grant,
+        "00000000-0000-0000-0000-000000000003",
+        "second",
+        clientCredential("00000000-0000-0000-0000-000000000004"),
+        1,
+      ),
+    ).toThrow(
+      new TransportError(
+        409,
+        "registration_quota_exhausted",
+        "registration grant quota exhausted",
+      ),
+    );
+    const storedCredential = store.db
+      .query("SELECT secret_hash FROM credentials WHERE id=?")
+      .get("00000000-0000-0000-0000-000000000002") as {
+      secret_hash: Uint8Array;
+    };
+    expect(JSON.stringify(storedCredential)).not.toContain(credential);
+    expect(store.listRegistrationPrincipals(grant, 1)).toEqual([
+      created.principal,
+    ]);
+    store.close();
+  });
+
+  test("keeps registrations and credentials across restart and revocation", () => {
+    const created = createStore();
+    const grantCredential = created.store.createRegistrationGrant(
+      "restart",
+      2,
+      new Date(10_000).toISOString(),
+      0,
+    ).credential;
+    const grant = created.store.authenticateRegistrationGrant(grantCredential)!;
+    const credential = clientCredential("00000000-0000-0000-0000-000000000005", "b");
+    const registration = created.store.registerPrincipal(
+      grant,
+      "00000000-0000-0000-0000-000000000006",
+      "worker",
+      credential,
+      0,
+    );
+    created.store.close();
+
+    const reopened = new TransportStore(created.path);
+    const reopenedGrant = reopened.authenticateRegistrationGrant(grantCredential)!;
+    expect(reopened.listRegistrationPrincipals(reopenedGrant, 1)).toEqual([
+      registration.principal,
+    ]);
+    expect(reopened.authenticate(credential)?.id).toBe(registration.principal.id);
+    reopened.revokePrincipal(registration.principal.name, 2);
+    expect(
+      reopened.registerPrincipal(
+        reopenedGrant,
+        "00000000-0000-0000-0000-000000000006",
+        "worker",
+        credential,
+        3,
+      ),
+    ).toEqual({
+      principal: { ...registration.principal, status: "revoked" },
+      duplicate: true,
+    });
+    expect(reopened.authenticate(credential)).toBeNull();
+    reopened.revokeRegistrationGrant(reopenedGrant.id, 2);
+    expect(() => reopened.assertRegistrationGrantUsable(reopenedGrant, 2)).toThrow(
+      new TransportError(
+        403,
+        "registration_grant_revoked",
+        "registration grant is revoked",
+      ),
+    );
+    reopened.close();
+  });
+});
+
+describe("lease renewal", () => {
+  test("extends only a live owned lease, preserves longer expiry, and survives restart", () => {
+    const created = createStore();
+    const alice = principal(created.store, "alice");
+    const bob = principal(created.store, "bob");
+    created.store.send(
+      alice.actor,
+      "renew-1",
+      { to: { kind: "principal", name: "bob" }, payload: "renew me" },
+      1_000,
+    );
+    const lease = created.store.claim(bob.actor, 1, 60, 1_000)[0];
+    const extended = created.store.renewLease(
+      bob.actor,
+      lease.delivery_id,
+      lease.lease_token,
+      120,
+      2_000,
+    );
+    expect(extended.lease_expires_at).toBe(new Date(122_000).toISOString());
+    expect(
+      created.store.renewLease(
+        bob.actor,
+        lease.delivery_id,
+        lease.lease_token,
+        1,
+        3_000,
+      ),
+    ).toEqual(extended);
+    expect(
+      created.store.db
+        .query("SELECT lease_expires_at FROM delivery_attempts WHERE delivery_id=?")
+        .get(lease.delivery_id),
+    ).toEqual({ lease_expires_at: extended.lease_expires_at });
+    expect(() =>
+      created.store.renewLease(
+        alice.actor,
+        lease.delivery_id,
+        lease.lease_token,
+        120,
+        3_001,
+      ),
+    ).toThrow(
+      new TransportError(404, "delivery_not_found", "delivery not found"),
+    );
+    created.store.close();
+
+    const reopened = new TransportStore(created.path);
+    const recoveredBob = reopened.authenticate(bob.credential)!;
+    expect(() =>
+      reopened.renewLease(
+        recoveredBob,
+        lease.delivery_id,
+        lease.lease_token,
+        120,
+        122_001,
+      ),
+    ).toThrow(new TransportError(409, "stale_lease", "lease is not active"));
+    expect(reopened.claim(recoveredBob, 1, 10, 122_001)).toHaveLength(1);
+    reopened.close();
+  });
+});

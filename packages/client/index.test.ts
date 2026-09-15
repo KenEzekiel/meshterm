@@ -240,3 +240,35 @@ describe("generic downstream transport client", () => {
     expect(requestSignal?.aborted).toBe(true);
   });
 });
+
+test("wait deadline does not discard a claim already accepted by the server", async () => {
+  const item = { delivery_id: "d-delayed", message_id: "m-delayed" };
+  let calls = 0;
+  const client = new MeshtermClient({
+    server: "https://mesh.example.test", credential: "mtk_test", timeoutMs: 200,
+    fetch: (async (_url, init) => {
+      calls++;
+      return new Promise<Response>((resolve, reject) => {
+        const timer = setTimeout(() => resolve(new Response(JSON.stringify({ items: [item] }))), 40);
+        init?.signal?.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("aborted")); }, { once: true });
+      });
+    }) as typeof fetch,
+  });
+  expect(await client.waitForDelivery({ timeoutMs: 10 })).toMatchObject(item);
+  expect(calls).toBe(1);
+});
+
+test("an uncertain claim timeout stops instead of repeatedly consuming delivery attempts", async () => {
+  let calls = 0;
+  const client = new MeshtermClient({
+    server: "https://mesh.example.test", credential: "mtk_test", timeoutMs: 10,
+    fetch: (async (_url, init) => {
+      calls++;
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    }) as typeof fetch,
+  });
+  await expect(client.waitForDelivery({ timeoutMs: 100 })).rejects.toMatchObject({ name: "MeshtermClaimTimeoutError" });
+  expect(calls).toBe(1);
+});

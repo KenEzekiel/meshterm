@@ -56,7 +56,7 @@ describe("Transport Contract v1 HTTP API", () => {
     expect((await json(base, "/livez")).body).toEqual({ ok: true });
     expect((await json(base, "/readyz")).body).toMatchObject({
       ok: true,
-      store: { journal_mode: "wal", schema_version: 2 },
+      store: { journal_mode: "wal", schema_version: 3 },
     });
 
     const aliceCreated = await json(
@@ -485,5 +485,121 @@ describe("Transport Contract v1 HTTP API", () => {
     expect(responses.map((response: any) => response.id)).toEqual(["status"]);
     expect(responses[0].result.structuredContent).toHaveProperty("ready");
     expect(errors).toBe("");
+  });
+
+  test("enforces registration grant scope and renews only the recipient lease", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "meshterm-registration-api-"));
+    cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
+    const operatorToken = "operator-token-is-at-least-thirty-two-characters";
+    const running = startServer({
+      port: testPort(),
+      hostname: "127.0.0.1",
+      databasePath: join(directory, "meshterm.sqlite"),
+      operatorToken,
+    });
+    cleanups.push(() => running.stop());
+    const base = `http://${running.server.hostname}:${running.server.port}`;
+    const grantResponse = await json(
+      base,
+      "/v1/operator/registration-grants",
+      operatorToken,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          namespace: "sessions",
+          max_principals: 2,
+          expires_at: new Date(Date.now() + 60_000).toISOString(),
+        }),
+      },
+    );
+    expect(grantResponse.status).toBe(201);
+    expect(Object.keys(grantResponse.body).sort()).toEqual([
+      "credential",
+      "grant_id",
+    ]);
+    const grantCredential = grantResponse.body.credential as string;
+    const registrationCredential =
+      `mtk_00000000-0000-0000-0000-000000000002.${"a".repeat(64)}`;
+    const registration = await json(base, "/v1/registrations", grantCredential, {
+      method: "POST",
+      body: JSON.stringify({
+        registration_key: "00000000-0000-0000-0000-000000000001",
+        label: "session",
+        credential: registrationCredential,
+      }),
+    });
+    expect(registration.status).toBe(201);
+    expect(registration.body).toMatchObject({
+      duplicate: false,
+      principal: { name: "sessions-session-7ac1b8d7010b", kind: "agent" },
+    });
+    expect(
+      (await json(base, "/v1/registrations", grantCredential)).body,
+    ).toEqual({ principals: [registration.body.principal] });
+    expect(
+      (await json(base, "/v1/messages", grantCredential, {
+        method: "POST",
+        headers: { "idempotency-key": "grant-scope" },
+        body: JSON.stringify({
+          to: { kind: "principal", name: registration.body.principal.name },
+          payload: "must be denied",
+        }),
+      })).status,
+    ).toBe(403);
+    expect(
+      (await json(base, "/v1/registrations", registrationCredential)).status,
+    ).toBe(403);
+    expect(
+      (await json(base, "/v1/me", registrationCredential)).body,
+    ).toEqual({ principal: registration.body.principal });
+
+    const sender = await json(base, "/v1/operator/principals", operatorToken, {
+      method: "POST",
+      body: JSON.stringify({ name: "sender" }),
+    });
+    const sent = await json(base, "/v1/messages", sender.body.credential, {
+      method: "POST",
+      headers: { "idempotency-key": "renew-api-1" },
+      body: JSON.stringify({
+        to: { kind: "principal", name: registration.body.principal.name },
+        payload: "lease me",
+      }),
+    });
+    expect(sent.status).toBe(202);
+    const claim = await json(base, "/v1/claims", registrationCredential, {
+      method: "POST",
+      body: JSON.stringify({ limit: 1, lease_seconds: 60 }),
+    });
+    expect(claim.status).toBe(200);
+    const delivery = claim.body.items[0];
+    const renewed = await json(
+      base,
+      `/v1/deliveries/${encodeURIComponent(delivery.delivery_id)}/renew`,
+      registrationCredential,
+      {
+        method: "POST",
+        body: JSON.stringify({ lease_token: delivery.lease_token, lease_seconds: 120 }),
+      },
+    );
+    expect(renewed.status).toBe(200);
+    expect(Date.parse(renewed.body.lease_expires_at)).toBeGreaterThan(
+      Date.parse(delivery.lease_expires_at),
+    );
+    expect(
+      (
+        await json(
+          base,
+          `/v1/deliveries/${encodeURIComponent(delivery.delivery_id)}/renew`,
+          sender.body.credential,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              lease_token: delivery.lease_token,
+              lease_seconds: 120,
+            }),
+          },
+        )
+      ).status,
+    ).toBe(404);
   });
 });
