@@ -261,6 +261,17 @@ export class MeshtermClient {
     return this.request(`/v1/history?${query}`);
   }
 
+  async identity(): Promise<{ principal: { id: string; name: string; kind: string; status: string } }> {
+    return this.request("/v1/me");
+  }
+
+  async renew(deliveryId: string, leaseToken: string, leaseSeconds = 120): Promise<{ lease_expires_at: string }> {
+    return this.request(`/v1/deliveries/${encodeURIComponent(deliveryId)}/renew`, {
+      method: "POST",
+      body: JSON.stringify({ lease_token: leaseToken, lease_seconds: leaseSeconds }),
+    });
+  }
+
   async metrics(): Promise<any> {
     return this.request("/v1/metrics");
   }

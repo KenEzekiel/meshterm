@@ -4,7 +4,8 @@
   "description": "Authenticated durable transport for agents and services",
   "type": "module",
   "bin": {
-    "meshterm": "./bin/meshterm.mjs"
+    "meshterm": "./bin/meshterm.mjs",
+    "meshterm-agent": "./integrations/agents/cli.ts"
   },
   "files": [
     "bin/",
@@ -18,13 +19,14 @@
     "CHANGELOG.md",
     "CONTRIBUTING.md",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "integrations/agents/"
   ],
   "scripts": {
     "server": "bun run packages/server/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "build": "bun build packages/cli/index.ts packages/client/index.ts packages/client/broker.ts packages/server/server.ts packages/mcp/index.ts --outdir dist --target bun",
+    "build": "bun build packages/cli/index.ts packages/client/index.ts packages/client/broker.ts packages/server/server.ts packages/mcp/index.ts --outdir dist --target bun && bun build integrations/agents/cli.ts integrations/agents/pi.ts --outdir dist/agents --target bun",
     "verify:transport-v1": "bun test packages/server/transport.test.ts packages/mcp/index.test.ts packages/cli/security.test.ts"
   },
   "keywords": [
