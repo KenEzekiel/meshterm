@@ -515,6 +515,66 @@ describe("durable transport contract", () => {
     store.close();
   });
 
+  test("matches replies by recipient, parent, and sender without leasing unrelated work", () => {
+    const { store } = createStore();
+    const alice = principal(store, "alice");
+    const bob = principal(store, "bob");
+    const mallory = principal(store, "mallory");
+    store.createChannel(alice.actor, "matching-requests", ["bob", "mallory"]);
+    const parent = store.send(
+      alice.actor,
+      "matching-parent",
+      { to: { kind: "channel", name: "matching-requests" }, payload: "request" },
+      1_000,
+    );
+    const reply = store.send(
+      bob.actor,
+      "matching-reply",
+      {
+        to: { kind: "principal", name: "alice" },
+        payload: "matching reply",
+        reply_to: parent.message_id,
+      },
+      1_001,
+    );
+    store.send(
+      bob.actor,
+      "matching-unrelated",
+      { to: { kind: "principal", name: "alice" }, payload: "unrelated" },
+      1_002,
+    );
+    store.send(
+      mallory.actor,
+      "matching-wrong-sender",
+      {
+        to: { kind: "principal", name: "alice" },
+        payload: "wrong sender",
+        reply_to: parent.message_id,
+      },
+      1_003,
+    );
+    store.revokePrincipal("bob");
+    const matching = store.claim(
+      alice.actor,
+      1,
+      60,
+      2_000,
+      { reply_to: parent.message_id, from: "bob" },
+    );
+    expect(matching).toHaveLength(1);
+    expect(matching[0]).toMatchObject({
+      message_id: reply.message_id,
+      payload: "matching reply",
+      from: "bob",
+    });
+    const remaining = store.claim(alice.actor, 10, 60, 2_000);
+    expect(remaining.map((item) => item.payload)).toEqual([
+      "unrelated",
+      "wrong sender",
+    ]);
+    store.close();
+  });
+
   test("claims more than five small deliveries when requested", () => {
     const { store } = createStore();
     const alice = principal(store, "alice");

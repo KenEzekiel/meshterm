@@ -5,6 +5,7 @@ import {
   LATEST_SCHEMA_VERSION,
   TransportError,
   TransportStore,
+  type ClaimFilter,
 } from "./transport";
 
 export interface ServerOptions {
@@ -273,6 +274,35 @@ export function startServer(options: ServerOptions = {}) {
               : Number(input.lease_seconds),
           );
           log("deliveries.claimed", {
+            request_id: requestId,
+            principal_id: principal.id,
+            count: items.length,
+          });
+          return json({ items }, 200, requestId);
+        }
+        if (req.method === "POST" && path === "/v1/claims/matching") {
+          const input = await body(req);
+          if (typeof input.reply_to !== "string" || typeof input.from !== "string") {
+            throw new TransportError(
+              400,
+              "invalid_claim_filter",
+              "reply_to and from are required",
+            );
+          }
+          const filter: ClaimFilter = {
+            reply_to: input.reply_to,
+            from: input.from,
+          };
+          const items = store.claim(
+            principal,
+            input.limit === undefined ? 1 : Number(input.limit),
+            input.lease_seconds === undefined
+              ? 60
+              : Number(input.lease_seconds),
+            Date.now(),
+            filter,
+          );
+          log("deliveries.matched", {
             request_id: requestId,
             principal_id: principal.id,
             count: items.length,

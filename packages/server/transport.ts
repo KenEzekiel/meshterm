@@ -41,6 +41,11 @@ export interface ClaimedDelivery {
   lease_expires_at: string;
 }
 
+export interface ClaimFilter {
+  reply_to?: string;
+  from?: string;
+}
+
 export class TransportError extends Error {
   constructor(
     public readonly status: number,
@@ -823,7 +828,9 @@ export class TransportStore {
     limit = 10,
     leaseSeconds = 60,
     now = Date.now(),
+    filter: ClaimFilter = {},
   ): ClaimedDelivery[] {
+    const claimFilter = filter;
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
       throw new TransportError(400, "invalid_limit", "limit must be between 1 and 100");
     }
@@ -838,11 +845,56 @@ export class TransportStore {
         "lease_seconds must be between 1 and 3600",
       );
     }
+    if (
+      claimFilter.reply_to !== undefined &&
+      (typeof claimFilter.reply_to !== "string" ||
+        claimFilter.reply_to.length < 1 ||
+        claimFilter.reply_to.length > 128)
+    ) {
+      throw new TransportError(
+        400,
+        "invalid_claim_filter",
+        "reply_to must be a valid message ID",
+      );
+    }
+    if (
+      claimFilter.from !== undefined &&
+      (typeof claimFilter.from !== "string" ||
+        !principalPattern.test(claimFilter.from))
+    ) {
+      throw new TransportError(
+        400,
+        "invalid_claim_filter",
+        "from must be a valid principal name",
+      );
+    }
+    let senderId: string | undefined;
+    if (claimFilter.from !== undefined) {
+      const sender = this.db
+        .query("SELECT id FROM principals WHERE name=?")
+        .get(claimFilter.from) as { id: string } | null;
+      if (!sender) return [];
+      senderId = sender.id;
+    }
     const nowIso = iso(now);
     const leaseExpiresAt = iso(now + leaseSeconds * 1000);
     const claimed: ClaimedDelivery[] = [];
     this.reapExpired(now, recipient.id);
     this.db.transaction(() => {
+      const predicates = [
+        "d.recipient_id=?",
+        "d.state='queued'",
+        "d.available_at<=?",
+      ];
+      const parameters: Array<string | number> = [recipient.id, nowIso];
+      if (claimFilter.reply_to !== undefined) {
+        predicates.push("m.reply_to=?");
+        parameters.push(claimFilter.reply_to);
+      }
+      if (senderId !== undefined) {
+        predicates.push("m.sender_id=?");
+        parameters.push(senderId);
+      }
       const candidates = this.db
         .query(
           `SELECT d.id AS delivery_id,
@@ -850,11 +902,11 @@ export class TransportStore {
                   length(CAST(COALESCE(m.attributes_json,'') AS BLOB)) AS attributes_bytes
            FROM deliveries d
            JOIN messages m ON m.id=d.message_id
-           WHERE d.recipient_id=? AND d.state='queued' AND d.available_at<=?
+           WHERE ${predicates.join(" AND ")}
            ORDER BY d.available_at,m.created_at,d.id
            LIMIT ?`,
         )
-        .all(recipient.id, nowIso, limit) as Array<{
+        .all(...parameters, limit) as Array<{
           delivery_id: string;
           payload_bytes: number;
           attributes_bytes: number;
