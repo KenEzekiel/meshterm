@@ -2,11 +2,19 @@ import { createHash, randomBytes, randomUUID } from "crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync, statSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
-import { MeshtermClient, MeshtermClientError, type ClaimedDelivery, type WaitForDeliveryOptions } from "../../packages/client";
+import { MeshtermClient, MeshtermClientError, MeshtermClaimTimeoutError, type ClaimedDelivery, type WaitForDeliveryOptions } from "../../packages/client";
 
 export class AgentError extends Error {}
 export function safeMessage(error: unknown): string {
+  if (error instanceof MeshtermClaimTimeoutError) return error.message;
   if (error instanceof AgentError) return error.message;
+  if (error instanceof MeshtermClientError && error.status === 404) {
+    try {
+      if (JSON.parse(error.responseBody)?.error?.code === "recipient_not_found") {
+        return "Recipient name not found. Set the 'to' argument to the exact name field from mesh_peers, not its id/UUID. Correct the recipient before retrying.";
+      }
+    } catch { /* Never expose an unrecognized server response body. */ }
+  }
   if (error instanceof MeshtermClientError) return `Meshterm HTTP ${error.status}; check the session credential and delivery lease.`;
   return "Meshterm operation failed; check setup and session state. No acknowledgement was assumed.";
 }

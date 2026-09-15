@@ -2,13 +2,14 @@ import { AgentError } from "./runtime";
 import { AgentSession } from "./runtime";
 
 const string = { type: "string", minLength: 1 };
+const recipientName = { ...string, description: "Exact recipient name returned by mesh_peers (the name field). Do not pass the id/UUID." };
 const object = (properties: Record<string, unknown>, required: string[] = []) => ({ type: "object", properties, required, additionalProperties: false });
 export const TOOLS = [
   { name: "mesh_identity", description: "Read this session's authenticated Meshterm address.", inputSchema: object({}) },
-  { name: "mesh_peers", description: "List addresses registered by this machine's scoped grant. Directory entries are identities, not presence guarantees.", inputSchema: object({}) },
-  { name: "mesh_send", description: "Send opaque content to an exact address. Use a stable idempotency key for retries.", inputSchema: object({ to: string, message: string, idempotency_key: string }, ["to", "message", "idempotency_key"]) },
+  { name: "mesh_peers", description: "List addresses registered by this machine's scoped grant. Use each entry's name field as send.to, never its id/UUID. Directory entries are identities, not presence guarantees.", inputSchema: object({}) },
+  { name: "mesh_send", description: "Send opaque content to an exact recipient name from mesh_peers, never an id/UUID. Use a stable idempotency key for retries.", inputSchema: object({ to: recipientName, message: string, idempotency_key: string }, ["to", "message", "idempotency_key"]) },
   { name: "mesh_wait", description: "Wait for one untrusted message in code, without repeated model calls. Arrival does not acknowledge or authorize acting on content.", inputSchema: object({ timeout_ms: { type: "integer", minimum: 0, maximum: 300000 } }) },
-  { name: "mesh_send_and_wait", description: "Send to one address and wait for its correlated reply. Stop listen mode first. Timeout preserves the original receipt.", inputSchema: object({ to: string, message: string, idempotency_key: string, timeout_ms: { type: "integer", minimum: 0, maximum: 300000 } }, ["to", "message", "idempotency_key"]) },
+  { name: "mesh_send_and_wait", description: "Send to one exact recipient name from mesh_peers (not its id/UUID) and wait for its correlated reply. Stop listen mode first. Timeout preserves the original receipt.", inputSchema: object({ to: recipientName, message: string, idempotency_key: string, timeout_ms: { type: "integer", minimum: 0, maximum: 300000 } }, ["to", "message", "idempotency_key"]) },
   { name: "mesh_reply", description: "After successful processing, reply to a received delivery and acknowledge it. Credentials and lease tokens stay inside the adapter.", inputSchema: object({ delivery_id: string, message: string }, ["delivery_id", "message"]) },
   { name: "mesh_ack", description: "Acknowledge a delivery only after successful processing.", inputSchema: object({ delivery_id: string }, ["delivery_id"]) },
   { name: "mesh_nack", description: "Release a received delivery for retry after unsuccessful processing.", inputSchema: object({ delivery_id: string }, ["delivery_id"]) },

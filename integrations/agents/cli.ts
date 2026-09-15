@@ -112,8 +112,8 @@ export async function run(args: string[]) {
             value = { content: [{ type: "text", text: JSON.stringify(result) }] };
           } else throw new AgentError("Unknown request");
           if (!controller.signal.aborted) console.log(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: value }));
-        } catch {
-          if (!controller.signal.aborted) console.log(JSON.stringify({ jsonrpc: "2.0", id: request.id, error: { code: -32603, message: "Meshterm session operation failed" } }));
+        } catch (error) {
+          if (!controller.signal.aborted) console.log(JSON.stringify({ jsonrpc: "2.0", id: request.id, error: { code: -32603, message: safeMessage(error) } }));
         }
       })();
       pending.set(request.id, { controller, waiting: ["mesh_wait", "mesh_send_and_wait"].includes(request.params?.name), task });

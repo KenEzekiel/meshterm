@@ -85,7 +85,7 @@ export default function meshterm(pi: PiAPI) {
             display: true,
           }, { triggerTurn: true, deliverAs: "followUp" });
         }
-      })().catch(() => { if (!controller.signal.aborted) ctx.ui.notify("Meshterm listener failed; use /mesh stop then /mesh listen to retry.", "error"); });
+      })().catch((error) => { if (!controller.signal.aborted) ctx.ui.notify(`Meshterm listener stopped: ${safeMessage(error)} Use /mesh stop then /mesh listen to retry.`, "error"); });
       ctx.ui.notify("Meshterm listening. Incoming messages may start a Pi turn; processing uses model tokens, waiting does not.");
     },
   });

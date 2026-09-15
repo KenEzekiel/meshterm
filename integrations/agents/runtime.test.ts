@@ -3,8 +3,9 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync
 import { join } from "path";
 import { tmpdir } from "os";
 import { startServer } from "../../packages/server/server";
-import { ensureSession, installRegistration, loadSession } from "./runtime";
+import { ensureSession, installRegistration, loadSession, safeMessage } from "./runtime";
 import { bindMcp } from "./launch";
+import { MeshtermClientError } from "../../packages/client";
 import { callTool } from "./tools";
 import piExtension from "./pi";
 
@@ -161,4 +162,25 @@ test("Pi extension registers native IDs, waits only after opt-in, marks remote c
   const reply = await codex.wait({ timeoutMs: 0 });
   expect(reply?.payload).toBe("pong");
   await codex.ack(reply!.delivery_id);
+});
+
+
+test("UUID send target explains the name field and preserves safe error handling", async () => {
+  const { create } = fixture();
+  const sender = await create("codex", "name-test");
+  const receiver = await create("pi", "name-test");
+  for (const name of ["mesh_send", "mesh_send_and_wait"]) {
+    let caught: unknown;
+    try { await callTool(sender, name, { to: receiver.principal.id, message: "ping", idempotency_key: name, timeout_ms: 0 }); }
+    catch (error) { caught = error; }
+    expect(safeMessage(caught)).toContain("name field from mesh_peers, not its id/UUID");
+  }
+  await callTool(sender, "mesh_send", { to: receiver.principal.name, message: "ping", idempotency_key: "correct-name" });
+  const delivery = await receiver.wait({ timeoutMs: 0 });
+  expect(delivery?.payload).toBe("ping");
+  await receiver.ack(delivery!.delivery_id);
+  for (const body of ["private-response", JSON.stringify({ error: { code: "delivery_not_found", message: "private-response" } })]) {
+    expect(safeMessage(new MeshtermClientError(404, body))).not.toContain("private-response");
+    expect(safeMessage(new MeshtermClientError(404, body))).not.toContain("Recipient name not found");
+  }
 });
