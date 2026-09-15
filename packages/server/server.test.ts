@@ -2,12 +2,13 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { MeshtermClient } from "../client";
 import { startServer } from "./server";
 
 const cleanups: Array<() => void> = [];
 
 function testPort(): number {
-  return 43_000 + Math.floor(Math.random() * 10_000);
+  return 0;
 }
 
 afterEach(() => {
@@ -197,6 +198,142 @@ describe("Transport Contract v1 HTTP API", () => {
     expect(removed.body.error.code).toBe("legacy_api_removed");
   });
 
+  test("matches a principal reply without consuming unrelated queued work", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "meshterm-api-matching-"));
+    cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
+    const running = startServer({
+      port: testPort(),
+      hostname: "127.0.0.1",
+      databasePath: join(directory, "meshterm.sqlite"),
+      operatorToken: "operator-token-is-at-least-thirty-two-characters",
+    });
+    cleanups.push(() => running.stop());
+    const alice = running.store.createPrincipal("alice");
+    const bob = running.store.createPrincipal("bob");
+    const mallory = running.store.createPrincipal("mallory");
+    const aliceActor = running.store.authenticate(alice.credential);
+    if (!aliceActor) throw new Error("alice authentication failed");
+    running.store.createChannel(aliceActor, "matching-requests", ["bob", "mallory"]);
+    const parent = running.store.send(
+      aliceActor,
+      "http-parent-1",
+      { to: { kind: "channel", name: "matching-requests" }, payload: "request" },
+    );
+    const bobActor = running.store.authenticate(bob.credential);
+    const malloryActor = running.store.authenticate(mallory.credential);
+    if (!bobActor || !malloryActor) throw new Error("reply principal authentication failed");
+    const reply = running.store.send(
+      bobActor,
+      "http-reply-1",
+      {
+        to: { kind: "principal", name: "alice" },
+        payload: "reply",
+        reply_to: parent.message_id,
+      },
+    );
+    running.store.send(
+      bobActor,
+      "http-unrelated-1",
+      { to: { kind: "principal", name: "alice" }, payload: "unrelated" },
+    );
+    running.store.send(
+      malloryActor,
+      "http-wrong-sender-1",
+      {
+        to: { kind: "principal", name: "alice" },
+        payload: "wrong sender",
+        reply_to: parent.message_id,
+      },
+    );
+    const base = `http://${running.server.hostname}:${running.server.port}`;
+    const matching = await json(base, "/v1/claims/matching", alice.credential, {
+      method: "POST",
+      body: JSON.stringify({
+        limit: 1,
+        lease_seconds: 30,
+        reply_to: parent.message_id,
+        from: "bob",
+      }),
+    });
+    expect(matching.status).toBe(200);
+    expect(matching.body.items).toHaveLength(1);
+    expect(matching.body.items[0]).toMatchObject({
+      message_id: reply.message_id,
+      from: "bob",
+      payload: "reply",
+    });
+    expect(running.store.metrics(aliceActor).active_leases).toBe(1);
+    const remaining = await json(base, "/v1/claims", alice.credential, {
+      method: "POST",
+      body: JSON.stringify({ limit: 10, lease_seconds: 30 }),
+    });
+    expect(
+      remaining.body.items.map((item: any) => item.payload).sort(),
+    ).toEqual(["unrelated", "wrong sender"]);
+  });
+
+  test("completes a real principal request/reply without acknowledging either delivery", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "meshterm-api-request-reply-"));
+    cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
+    const running = startServer({
+      port: testPort(),
+      hostname: "127.0.0.1",
+      databasePath: join(directory, "meshterm.sqlite"),
+      operatorToken: "operator-token-is-at-least-thirty-two-characters",
+    });
+    cleanups.push(() => running.stop());
+    const alice = running.store.createPrincipal("alice");
+    const bob = running.store.createPrincipal("bob");
+    const base = `http://${running.server.hostname}:${running.server.port}`;
+    const requester = new MeshtermClient({
+      server: base,
+      credential: alice.credential,
+    });
+    const responder = new MeshtermClient({
+      server: base,
+      credential: bob.credential,
+    });
+    const unrelated = await responder.send("real-unrelated-1", {
+      to: { kind: "principal", name: "alice" },
+      payload: "unrelated",
+    });
+    const responderWait = responder.waitForDelivery({
+      timeoutMs: 1_000,
+      pollIntervalMs: 1,
+      maxPollIntervalMs: 4,
+    });
+    const request = requester.sendAndWait(
+      "real-request-1",
+      { to: { kind: "principal", name: "bob" }, payload: "request" },
+      { timeoutMs: 1_000, pollIntervalMs: 1, maxPollIntervalMs: 4 },
+    );
+    const incoming = await responderWait;
+    expect(incoming).toMatchObject({ payload: "request", from: "alice" });
+    await responder.send("real-reply-1", {
+      to: { kind: "principal", name: "alice" },
+      payload: "reply",
+      reply_to: incoming!.message_id,
+    });
+    const result = await request;
+    expect(result.reply).toMatchObject({
+      payload: "reply",
+      from: "bob",
+      reply_to: result.receipt.message_id,
+    });
+    const unrelatedState = running.store.db
+      .query("SELECT state,attempt_count FROM deliveries WHERE message_id=?")
+      .get(unrelated.message_id) as { state: string; attempt_count: number };
+    expect(unrelatedState).toEqual({ state: "queued", attempt_count: 0 });
+    const requestState = running.store.db
+      .query("SELECT state,attempt_count FROM deliveries WHERE message_id=?")
+      .get(result.receipt.message_id) as { state: string; attempt_count: number };
+    expect(requestState).toEqual({ state: "leased", attempt_count: 1 });
+    const replyState = running.store.db
+      .query("SELECT state,attempt_count FROM deliveries WHERE message_id=?")
+      .get(result.reply!.message_id) as { state: string; attempt_count: number };
+    expect(replyState).toEqual({ state: "leased", attempt_count: 1 });
+  });
+
   test("runs the packaged STDIO MCP flow against a live v1 server", async () => {
     const directory = mkdtempSync(join(tmpdir(), "meshterm-mcp-live-"));
     cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
@@ -208,6 +345,16 @@ describe("Transport Contract v1 HTTP API", () => {
     });
     cleanups.push(() => running.stop());
     const self = running.store.createPrincipal("desktop-agent");
+    const selfActor = running.store.authenticate(self.credential);
+    if (!selfActor) throw new Error("desktop principal authentication failed");
+    running.store.send(
+      selfActor,
+      "desktop-preloaded-1",
+      {
+        to: { kind: "principal", name: "desktop-agent" },
+        payload: "preloaded desktop message",
+      },
+    );
     writeFileSync(
       join(directory, "config.json"),
       `${JSON.stringify({
@@ -265,8 +412,78 @@ describe("Transport Contract v1 HTTP API", () => {
     expect(responses[3].result.structuredContent.items[0]).toMatchObject({
       from: "desktop-agent",
       to: "desktop-agent",
-      payload: "desktop roundtrip",
+      payload: "preloaded desktop message",
     });
+    expect(errors).toBe("");
+  });
+
+  test("cancels an outstanding MCP wait while another request completes", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "meshterm-mcp-cancel-"));
+    cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
+    const running = startServer({
+      port: testPort(),
+      hostname: "127.0.0.1",
+      databasePath: join(directory, "meshterm.sqlite"),
+      operatorToken: "operator-token-is-at-least-thirty-two-characters",
+    });
+    cleanups.push(() => running.stop());
+    const self = running.store.createPrincipal("cancel-agent");
+    writeFileSync(
+      join(directory, "config.json"),
+      `${JSON.stringify({
+        server: `http://${running.server.hostname}:${running.server.port}`,
+        credential: self.credential,
+      })}\n`,
+      { mode: 0o600 },
+    );
+    const mcpPath = join(import.meta.dir, "..", "mcp", "index.ts");
+    const child = Bun.spawn([process.execPath, "run", mcpPath], {
+      env: { ...process.env, MESHTERM_CONFIG_DIR: directory },
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    child.stdin.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: "waiting",
+        method: "tools/call",
+        params: {
+          name: "mesh_wait",
+          arguments: {
+            timeout_ms: 30_000,
+            poll_interval_ms: 5,
+            max_poll_interval_ms: 10,
+          },
+        },
+      })}\n`,
+    );
+    child.stdin.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: "status",
+        method: "tools/call",
+        params: { name: "mesh_status", arguments: {} },
+      })}\n`,
+    );
+    child.stdin.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        method: "notifications/cancelled",
+        params: { requestId: "waiting", reason: "test cancellation" },
+      })}\n`,
+    );
+    child.stdin.end();
+    const output = await new Response(child.stdout).text();
+    const errors = await new Response(child.stderr).text();
+    expect(await child.exited).toBe(0);
+    const responses = output
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    expect(responses.map((response: any) => response.id)).toEqual(["status"]);
+    expect(responses[0].result.structuredContent).toHaveProperty("ready");
     expect(errors).toBe("");
   });
 });

@@ -22,6 +22,8 @@ describe("MCP contract", () => {
   test("advertises only the reduced explicit delivery tool surface", () => {
     expect(TOOLS.map((tool) => tool.name)).toEqual([
       "mesh_send",
+      "mesh_wait",
+      "mesh_send_and_wait",
       "mesh_claim",
       "mesh_poll",
       "mesh_ack",
@@ -111,6 +113,175 @@ describe("MCP contract", () => {
     });
     expect(JSON.stringify(requestBody)).not.toContain("from");
     expect(headers).toMatchObject({ "idempotency-key": "event-1" });
+  });
+
+  test("send forwards reply_to while keeping sender authentication implicit", async () => {
+    let requestBody: Record<string, unknown> = {};
+    await callTool(
+      "mesh_send",
+      {
+        to: "bob",
+        message: "reply",
+        reply_to: "parent-1",
+        idempotency_key: "event-reply-1",
+      },
+      config,
+      mockFetch((_url, init) => {
+        requestBody = JSON.parse(String(init.body));
+        return { message_id: "reply-1" };
+      }),
+    );
+    expect(requestBody).toMatchObject({
+      to: { kind: "principal", name: "bob" },
+      payload: "reply",
+      reply_to: "parent-1",
+    });
+    expect(requestBody).not.toHaveProperty("from");
+  });
+
+  test("mesh_wait polls and leaves the delivery unacknowledged", async () => {
+    const requests: string[] = [];
+    const delivery = {
+      delivery_id: "delivery-1",
+      message_id: "message-1",
+      from: "alice",
+      to: "bob",
+      payload: "reply",
+      content_type: "text/plain",
+      attributes: null,
+      reply_to: null,
+      created_at: "2026-09-15T00:00:00.000Z",
+      attempt_count: 1,
+      lease_token: "mls_secret",
+      lease_expires_at: "2026-09-15T00:01:00.000Z",
+    };
+    let calls = 0;
+    const result = await callTool(
+      "mesh_wait",
+      { timeout_ms: 100, poll_interval_ms: 1, max_poll_interval_ms: 2 },
+      config,
+      mockFetch((url) => {
+        requests.push(new URL(url).pathname);
+        calls += 1;
+        return calls === 1 ? { items: [] } : { items: [delivery] };
+      }),
+    );
+    expect((result as any).structuredContent).toEqual(delivery);
+    expect(requests).toEqual(["/v1/claims", "/v1/claims"]);
+    expect(requests.some((path) => path.includes("ack"))).toBe(false);
+  });
+
+  test("mesh_send_and_wait returns the receipt and correlated reply", async () => {
+    const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
+    const receipt = {
+      message_id: "parent-1",
+      delivery_ids: ["parent-delivery"],
+      duplicate: false,
+      created_at: "2026-09-15T00:00:00.000Z",
+    };
+    const reply = { delivery_id: "reply-delivery", message_id: "reply-1" };
+    let call = 0;
+    const result = await callTool(
+      "mesh_send_and_wait",
+      {
+        to: "worker",
+        message: "request",
+        idempotency_key: "request-1",
+        timeout_ms: 100,
+        reply_to: "older-parent",
+      },
+      config,
+      mockFetch((url, init) => {
+        call += 1;
+        requests.push({
+          path: new URL(url).pathname,
+          body: init.body ? JSON.parse(String(init.body)) : {},
+        });
+        return call === 1 ? receipt : { items: [reply] };
+      }),
+    );
+    expect((result as any).structuredContent).toEqual({ receipt, reply });
+    expect(requests).toEqual([
+      {
+        path: "/v1/messages",
+        body: {
+          to: { kind: "principal", name: "worker" },
+          payload: "request",
+          reply_to: "older-parent",
+        },
+      },
+      {
+        path: "/v1/claims/matching",
+        body: {
+          limit: 1,
+          lease_seconds: 60,
+          reply_to: "parent-1",
+          from: "worker",
+        },
+      },
+    ]);
+  });
+
+  test("retains an accepted send receipt when waiting fails", async () => {
+    let calls = 0;
+    const receipt = {
+      message_id: "accepted-parent",
+      delivery_ids: ["delivery-1"],
+      duplicate: false,
+      created_at: "2026-09-15T00:00:00.000Z",
+    };
+    const response = await handleRequest(
+      {
+        jsonrpc: "2.0",
+        id: 8,
+        method: "tools/call",
+        params: {
+          name: "mesh_send_and_wait",
+          arguments: {
+            to: "worker",
+            message: "request",
+            idempotency_key: "request-failure-1",
+            timeout_ms: 0,
+          },
+        },
+      },
+      config,
+      (async (input: string | URL | Request) => {
+        calls += 1;
+        const path = new URL(String(input)).pathname;
+        return new Response(
+          JSON.stringify(calls === 1 ? receipt : { error: "legacy server" }),
+          { status: calls === 1 ? 202 : 404 },
+        );
+      }) as unknown as typeof fetch,
+    );
+    expect(response).toMatchObject({
+      error: {
+        code: -32603,
+        data: { receipt: { message_id: "accepted-parent" } },
+      },
+    });
+  });
+
+  test("cancellation aborts a pending MCP wait", async () => {
+    const caller = new AbortController();
+    const pending = callTool(
+      "mesh_wait",
+      { timeout_ms: 100, poll_interval_ms: 1 },
+      config,
+      (async (_input: string | URL | Request, init: RequestInit = {}) => {
+        await new Promise<never>((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+            once: true,
+          });
+        });
+        throw new Error("unreachable");
+      }) as unknown as typeof fetch,
+      caller.signal,
+    );
+    await Bun.sleep(1);
+    caller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 
   test("sanitizes tool failures instead of returning stack traces", async () => {
