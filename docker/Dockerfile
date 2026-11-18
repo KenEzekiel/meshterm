@@ -1,4 +1,4 @@
-FROM oven/bun:1.3.13-alpine
+FROM oven/bun:1.4.4-alpine
 WORKDIR /app
 COPY packages/server/server.ts packages/server/transport.ts ./packages/server/
 RUN mkdir -p /data && chown -R bun:bun /data
