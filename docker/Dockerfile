@@ -1,6 +1,6 @@
 FROM oven/bun:1.4.4-alpine
 WORKDIR /app
-COPY packages/server/server.ts packages/server/transport.ts ./packages/server/
+COPY packages/server/server.ts packages/server/transport.ts packages/server/metrics.ts ./packages/server/
 RUN mkdir -p /data && chown -R bun:bun /data
 ENV MESH_PORT=4200
 ENV MESH_HOST=0.0.0.0
