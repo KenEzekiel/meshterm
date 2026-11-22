@@ -7,13 +7,24 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:4200:4200"
+    networks:
+      default:
+      meshterm_metrics:
+        aliases:
+          - meshterm-production-metrics
     volumes:
       - mesh-data:/data
     environment:
       - MESH_OPERATOR_TOKEN=${MESH_OPERATOR_TOKEN:?MESH_OPERATOR_TOKEN must be set}
+      - MESH_METRICS_TOKEN=${MESH_METRICS_TOKEN:-}
       - MESH_HOST=0.0.0.0
       - MESH_PORT=4200
       - MESH_DATABASE=/data/meshterm.sqlite
+
+networks:
+  meshterm_metrics:
+    external: true
+    name: meshterm_metrics
 
 volumes:
   mesh-data:
