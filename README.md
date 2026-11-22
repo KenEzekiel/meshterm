@@ -58,6 +58,24 @@ MESHTERM_CREDENTIAL='mtk_...' \
 
 The config is stored with mode 0600.
 
+## Prometheus metrics
+
+Set `MESH_METRICS_TOKEN` to a separate random token of at least 32 characters to
+enable `GET /internal/metrics`. Send it as `Authorization: Bearer <metrics token>`.
+Missing/short configuration, invalid credentials and non-GET requests return 404.
+The metrics credential grants no principal or operator API access.
+
+The endpoint exports eight aggregate gauges from the existing transport store:
+queue depth, active leases, retained acknowledgements, dead letters, retained
+discards, retained retry attempts, oldest queued-delivery age and average retained
+acknowledgement latency. Durations use seconds. Retained counts can decrease after
+retention, so they are gauges rather than monotonic counters. There are no labels,
+principal/channel identifiers, payloads or attributes in the exposition.
+
+Scraping does not claim, acknowledge or modify deliveries and introduces no
+outbound telemetry. Configure private-network scraping separately; this endpoint
+does not install a collector, dashboard or alert rule.
+
 ## CLI
 
 ```text

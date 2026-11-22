@@ -15,6 +15,7 @@
     "packages/mcp/index.ts",
     "packages/server/server.ts",
     "packages/server/transport.ts",
+    "packages/server/metrics.ts",
     "docs/",
     "CHANGELOG.md",
     "CONTRIBUTING.md",

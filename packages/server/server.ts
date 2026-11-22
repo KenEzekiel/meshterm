@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { timingSafeEqual } from "crypto";
+import { transportMetricsText } from "./metrics";
 import {
   LATEST_SCHEMA_VERSION,
   TransportError,
@@ -13,6 +14,7 @@ export interface ServerOptions {
   hostname?: string;
   databasePath?: string;
   operatorToken?: string;
+  metricsToken?: string;
 }
 
 function json(
@@ -66,6 +68,7 @@ export function startServer(options: ServerOptions = {}) {
   if (operatorToken.length < 32) {
     throw new Error("MESH_OPERATOR_TOKEN must contain at least 32 characters");
   }
+  const metricsToken = options.metricsToken ?? process.env.MESH_METRICS_TOKEN ?? "";
   const store = new TransportStore(databasePath);
 
   const server = Bun.serve({
@@ -78,6 +81,29 @@ export function startServer(options: ServerOptions = {}) {
       const url = new URL(req.url);
       const { pathname: path } = url;
       try {
+        if (path === "/internal/metrics") {
+          const supplied = Buffer.from(bearer(req));
+          const expected = Buffer.from(metricsToken);
+          if (
+            req.method !== "GET" ||
+            metricsToken.length < 32 ||
+            supplied.length !== expected.length ||
+            !timingSafeEqual(supplied, expected)
+          ) {
+            return json(
+              { error: { code: "not_found", message: "route not found" } },
+              404,
+              requestId,
+            );
+          }
+          return new Response(transportMetricsText(store.metrics()), {
+            headers: {
+              "content-type": "text/plain; version=0.0.4; charset=utf-8",
+              "cache-control": "no-store",
+              "x-request-id": requestId,
+            },
+          });
+        }
         if (req.method === "GET" && (path === "/livez" || path === "/health")) {
           return json({ ok: true }, 200, requestId);
         }
