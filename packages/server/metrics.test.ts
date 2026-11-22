@@ -36,9 +36,10 @@ test("scrapes only aggregate gauges without disclosing or changing deliveries", 
   store.createPrincipal("private-recipient");
   const actor = store.authenticate(sender.credential);
   if (!actor) throw new Error("No fixture principal");
-  store.send(actor, "private-idempotency", { to: { kind: "principal", name: "private-recipient" }, payload: "private-payload", attributes: { value: "private-attribute" } });
+  const sent = store.send(actor, "private-idempotency", { to: { kind: "principal", name: "private-recipient" }, payload: "private-payload", attributes: { value: "private-attribute" } });
   const now = Date.now();
   const before = store.metrics(undefined, now);
+  const beforeMessage = store.getMessage(actor, sent.message_id);
   for (let i = 0; i < 2; i++) {
     const response = await fetch(base + "/internal/metrics?private-query=1", { headers: { authorization: `Bearer ${metricsToken}` } });
     expect(response.status).toBe(200);
@@ -56,5 +57,6 @@ test("scrapes only aggregate gauges without disclosing or changing deliveries", 
     expect(text).not.toContain(metricsToken);
   }
   expect(store.metrics(undefined, now)).toEqual(before);
+  expect(store.getMessage(actor, sent.message_id)).toEqual(beforeMessage);
   expect((await fetch(base + "/v1/operator/metrics", { headers: { authorization: `Bearer ${metricsToken}` } })).status).toBe(401);
 });
