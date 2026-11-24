@@ -4,6 +4,8 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     container_name: meshterm
+    labels:
+      observability.logs: "true"
     restart: unless-stopped
     ports:
       - "127.0.0.1:4200:4200"
