@@ -16,6 +16,7 @@
     "packages/server/server.ts",
     "packages/server/transport.ts",
     "packages/server/metrics.ts",
+    "packages/server/http-logging.ts",
     "docs/",
     "CHANGELOG.md",
     "CONTRIBUTING.md",
