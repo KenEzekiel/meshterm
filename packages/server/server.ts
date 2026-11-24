@@ -2,6 +2,7 @@
 
 import { timingSafeEqual } from "crypto";
 import { transportMetricsText } from "./metrics";
+import { withHttpLogging } from "./http-logging";
 import {
   LATEST_SCHEMA_VERSION,
   TransportError,
@@ -76,8 +77,7 @@ export function startServer(options: ServerOptions = {}) {
     hostname,
     // A decoded 1 MiB string can expand to roughly 6 MiB when JSON-escaped.
     maxRequestBodySize: 7_500_000,
-    async fetch(req) {
-      const requestId = crypto.randomUUID();
+    fetch: withHttpLogging(async (req, requestId) => {
       const url = new URL(req.url);
       const { pathname: path } = url;
       try {
@@ -556,7 +556,7 @@ export function startServer(options: ServerOptions = {}) {
           requestId,
         );
       }
-    },
+    }),
   });
   log("server.started", {
     hostname: server.hostname,
