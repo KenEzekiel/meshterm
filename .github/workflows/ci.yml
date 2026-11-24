@@ -47,4 +47,21 @@ jobs:
           exit 1
 
       - name: Build container
-        run: docker build -f docker/Dockerfile .
+        run: docker build -t "meshterm-ci:$GITHUB_SHA" -f docker/Dockerfile .
+
+      - name: Test container starts
+        run: |
+          smoke_container="meshterm-image-smoke-$GITHUB_RUN_ID"
+          trap 'docker rm -f "$smoke_container" >/dev/null 2>&1 || true' EXIT
+          docker run -d --name "$smoke_container" --network none \
+            --tmpfs /data:mode=1777,size=16m \
+            -e MESH_OPERATOR_TOKEN=ci-operator-token-with-at-least-32-characters \
+            "meshterm-ci:$GITHUB_SHA"
+          for attempt in {1..10}; do
+            if docker exec "$smoke_container" wget -qO- http://127.0.0.1:4200/readyz; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$smoke_container"
+          exit 1
